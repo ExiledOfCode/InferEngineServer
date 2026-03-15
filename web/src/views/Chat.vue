@@ -56,7 +56,7 @@
         </button>
         <div class="header-meta">
           <h1>{{ currentTitle }}</h1>
-          <p>ChatGPT 风格界面 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}</p>
+          <p>江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}</p>
         </div>
         <button class="ghost-btn" @click="handleNewChat">新建</button>
       </header>
@@ -65,13 +65,7 @@
         <div class="message-track">
           <div v-if="chatStore.messages.length === 0" class="welcome-card">
             <h2>有什么可以帮忙的？</h2>
-            <p>输入问题后，系统会以对话模式响应。你也可以试试下面几个提示。</p>
-            <div class="prompt-grid">
-              <button class="prompt-item" @click="fillPrompt('请用三点总结这段内容的核心结论')">总结一段文本</button>
-              <button class="prompt-item" @click="fillPrompt('帮我规划一个 7 天学习计划，每天 1 小时')">生成学习计划</button>
-              <button class="prompt-item" @click="fillPrompt('解释一下这个报错可能的原因和排查步骤')">调试报错问题</button>
-              <button class="prompt-item" @click="fillPrompt('把这段描述改写得更专业一点')">润色文字表达</button>
-            </div>
+            <p>欢迎使用江屿大模型，输入你的问题开始对话。</p>
           </div>
 
           <article
@@ -107,7 +101,7 @@
             type="textarea"
             :rows="1"
             :autosize="{ minRows: 1, maxRows: 8 }"
-            placeholder="给 ChatGPT 发消息"
+            placeholder="给 江屿大模型 发消息"
             :disabled="chatStore.loading"
             @keydown.enter.exact.prevent="handleSend"
           />
@@ -140,6 +134,7 @@ const inputMessage = ref('')
 const inputRef = ref(null)
 const messageListRef = ref(null)
 const mobileSidebarOpen = ref(false)
+let statusTimer = null
 
 const currentTitle = computed(() => chatStore.currentConversation?.title || '新对话')
 
@@ -169,15 +164,6 @@ function scrollToBottom() {
   }
 }
 
-function fillPrompt(text) {
-  inputMessage.value = text
-  nextTick(() => {
-    if (inputRef.value?.focus) {
-      inputRef.value.focus()
-    }
-  })
-}
-
 function handleWindowResize() {
   if (window.innerWidth > 960) {
     mobileSidebarOpen.value = false
@@ -199,10 +185,22 @@ onMounted(async () => {
   } catch (e) {
     ElMessage.warning(formatErrorMessage(e, '无法获取推理状态'))
   }
+
+  statusTimer = window.setInterval(async () => {
+    try {
+      await chatStore.fetchInferenceStatus()
+    } catch {
+      // ignore polling error
+    }
+  }, 10000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleWindowResize)
+  if (statusTimer) {
+    window.clearInterval(statusTimer)
+    statusTimer = null
+  }
 })
 
 watch(
@@ -586,31 +584,6 @@ function handleLogout() {
   font-size: 15px;
 }
 
-.prompt-grid {
-  margin-top: 20px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.prompt-item {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: #f9fbfe;
-  color: var(--text-primary);
-  text-align: left;
-  font-size: 13px;
-  line-height: 1.45;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.prompt-item:hover {
-  border-color: #b7c6dc;
-  background: #ffffff;
-}
-
 .message-row {
   display: flex;
   align-items: flex-start;
@@ -809,10 +782,6 @@ function handleLogout() {
   .composer-box,
   .composer-note {
     width: calc(100% - 20px);
-  }
-
-  .prompt-grid {
-    grid-template-columns: 1fr;
   }
 
   .message-body {

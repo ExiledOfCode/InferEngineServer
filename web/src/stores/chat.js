@@ -161,6 +161,11 @@ export const useChatStore = defineStore('chat', () => {
       })
       ElMessage.error(detail)
     } finally {
+      try {
+        await fetchInferenceStatus()
+      } catch {
+        // ignore status refresh failure
+      }
       loading.value = false
     }
   }
