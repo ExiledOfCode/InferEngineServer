@@ -1,0 +1,22 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+:root {
+  --sidebar-bg: #202123;
+  --sidebar-hover: #2A2B32;
+  --sidebar-border: #4D4D4F;
+  --main-bg: #343541;
+  --message-user-bg: #343541;
+  --message-ai-bg: #444654;
+  --text-primary: #ECECF1;
+  --text-secondary: #8E8EA0;
+  --accent-color: #10A37F;
+}
