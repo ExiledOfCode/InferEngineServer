@@ -4,19 +4,44 @@
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: "Soehne", "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  text-rendering: optimizeLegibility;
 }
 
 :root {
-  --sidebar-bg: #202123;
-  --sidebar-hover: #2A2B32;
-  --sidebar-border: #4D4D4F;
-  --main-bg: #343541;
-  --message-user-bg: #343541;
-  --message-ai-bg: #444654;
-  --text-primary: #ECECF1;
-  --text-secondary: #8E8EA0;
-  --accent-color: #10A37F;
+  --surface-base: #f7f7f8;
+  --surface-main: #ffffff;
+  --surface-sidebar: #eceff4;
+  --surface-sidebar-hover: #dfe4ec;
+  --surface-input: #ffffff;
+  --surface-user-message: #eef2f7;
+  --surface-ai-message: #ffffff;
+  --border-subtle: #d8dde7;
+  --border-strong: #c6cfdd;
+  --text-primary: #1f2430;
+  --text-secondary: #5f6572;
+  --text-muted: #8b92a1;
+  --accent-color: #10a37f;
+  --accent-color-strong: #0f8e6f;
+  --danger-color: #d9534f;
+  --shadow-card: 0 12px 32px rgba(16, 30, 53, 0.08);
+  --shadow-float: 0 20px 45px rgba(14, 30, 63, 0.15);
+}
+
+#app {
+  min-height: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+.el-message {
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
 }
