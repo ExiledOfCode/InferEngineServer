@@ -100,8 +100,12 @@ CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 CORS_ALLOW_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.\d+\.\d+)(:\d+)?$
 # 推理生成长度（默认 128，过小会导致回复很短）
 INFERENCE_MAX_NEW_TOKENS=128
-# prompt 格式：raw（更接近直接运行 main_qwen）或 chatml
-INFERENCE_PROMPT_FORMAT=raw
+# 是否在后端启动时立即加载模型（默认 false，避免大模型拖慢/阻塞 API 启动）
+INFERENCE_EAGER_START=false
+# prompt 格式：auto（默认，Instruct 模型自动走 chatml）、chatml、raw
+INFERENCE_PROMPT_FORMAT=auto
+# 可选：chatml 下的 system 提示词
+INFERENCE_SYSTEM_PROMPT=You are a helpful assistant.
 # raw 模式是否拼接历史上下文（默认 false）
 INFERENCE_RAW_WITH_HISTORY=false
 # 可选：指定模型目录（相对 INFERENCE_ENGINE_PATH/models）

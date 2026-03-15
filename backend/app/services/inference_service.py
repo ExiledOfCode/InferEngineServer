@@ -32,13 +32,21 @@ class InferenceService:
         self.startup_timeout_seconds = self._read_positive_int("INFERENCE_STARTUP_TIMEOUT_SECONDS", 900)
         self.max_history_messages = self._read_positive_int("INFERENCE_MAX_HISTORY_MESSAGES", 8)
         self.max_prompt_chars = self._read_positive_int("INFERENCE_MAX_PROMPT_CHARS", 2400)
-        self.prompt_format = self._read_prompt_format("INFERENCE_PROMPT_FORMAT", "raw")
+        self.prompt_format = self._read_prompt_format("INFERENCE_PROMPT_FORMAT", "auto")
         self.raw_with_history = self._read_bool("INFERENCE_RAW_WITH_HISTORY", False)
+        self.system_prompt = (
+            os.getenv("INFERENCE_SYSTEM_PROMPT", "You are a helpful assistant.").strip()
+            or "You are a helpful assistant."
+        )
+        self.eager_start = self._read_bool("INFERENCE_EAGER_START", False)
         if self.max_new_tokens < 8:
             print(f"[WARN] INFERENCE_MAX_NEW_TOKENS={self.max_new_tokens} 偏小，可能导致回复很短。")
 
         self._detect_model()
-        self._start_engine()
+        if self.eager_start:
+            self._start_engine()
+        else:
+            print("[Inference] 已启用延迟启动：首次 generate 时再启动推理进程。")
 
     @staticmethod
     def _read_positive_int(env_name: str, default: int) -> int:
@@ -72,7 +80,22 @@ class InferenceService:
     @staticmethod
     def _read_prompt_format(env_name: str, default: str) -> str:
         raw = str(os.getenv(env_name, default)).strip().lower()
-        return raw if raw in {"raw", "chatml"} else default
+        return raw if raw in {"raw", "chatml", "auto"} else default
+
+    def _effective_prompt_format(self) -> str:
+        if self.prompt_format in {"raw", "chatml"}:
+            return self.prompt_format
+
+        # auto: 对 instruct/chat 模型优先走 chatml，其余模型保持 raw
+        model_hint = " ".join(
+            [
+                os.path.basename(self.model_path or ""),
+                os.path.basename(os.path.dirname(self.model_path or "")),
+            ]
+        ).lower()
+        if any(key in model_hint for key in ("instruct", "chat", "qwen")):
+            return "chatml"
+        return "raw"
 
     def _next_request_id(self) -> int:
         with self.counter_lock:
@@ -424,7 +447,10 @@ class InferenceService:
         self._start_stdout_reader()
         ready_line = self._readline_with_timeout(self.startup_timeout_seconds)
         if ready_line is None:
-            print(f"✗ 推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）")
+            if self.process and self.process.poll() is not None:
+                print(f"✗ 推理进程启动失败（未收到 READY，退出码 {self.process.returncode}）")
+            else:
+                print(f"✗ 推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）")
             self._stop_process()
             return
         if ready_line.strip() != "[READY]":
@@ -439,7 +465,8 @@ class InferenceService:
         print(f"  模型: {os.path.basename(self.model_path)}")
         print(f"  分词器: {os.path.basename(self.tokenizer_path)}")
         print(f"  max_new_tokens: {self.max_new_tokens}")
-        print(f"  prompt_format: {self.prompt_format}")
+        print(f"  prompt_format: {self.prompt_format} (effective={self._effective_prompt_format()})")
+        print(f"  system_prompt: {self.system_prompt}")
         print(f"  raw_with_history: {self.raw_with_history}")
         print(f"  max_prompt_chars: {self.max_prompt_chars}")
         print(f"  timeout: {self.timeout_seconds}s")
@@ -511,9 +538,11 @@ class InferenceService:
         start_time = time.monotonic()
         safe_history = history or []
         model_prompt = self._build_prompt(prompt, safe_history)
+        effective_prompt_format = self._effective_prompt_format()
         print(
             f"[Inference][{req_id}] start: history={len(safe_history)} "
-            f"prompt_chars={len(model_prompt)} max_new_tokens={self.max_new_tokens}"
+            f"prompt_chars={len(model_prompt)} max_new_tokens={self.max_new_tokens} "
+            f"prompt_format={effective_prompt_format}"
         )
 
         if not self.is_running():
@@ -530,7 +559,8 @@ class InferenceService:
         return response
 
     def _build_prompt(self, prompt: str, history: List[Dict]) -> str:
-        if self.prompt_format == "raw":
+        effective_prompt_format = self._effective_prompt_format()
+        if effective_prompt_format == "raw":
             return self._build_raw_prompt(prompt, history)
         return self._build_chatml_prompt(prompt, history)
 
@@ -589,7 +619,7 @@ class InferenceService:
                 messages.append({"role": "user", "content": clean_prompt})
 
         if not any(message["role"] == "system" for message in messages):
-            messages.insert(0, {"role": "system", "content": "You are a helpful assistant."})
+            messages.insert(0, {"role": "system", "content": self.system_prompt})
 
         messages = self._truncate_messages_by_chars(messages)
 
@@ -786,11 +816,14 @@ class InferenceService:
             "configured_tokenizer_path": settings.INFERENCE_TOKENIZER_PATH,
             "max_new_tokens": self.max_new_tokens,
             "prompt_format": self.prompt_format,
+            "effective_prompt_format": self._effective_prompt_format(),
+            "system_prompt": self.system_prompt,
             "raw_with_history": self.raw_with_history,
             "max_history_messages": self.max_history_messages,
             "max_prompt_chars": self.max_prompt_chars,
             "timeout_seconds": self.timeout_seconds,
             "startup_timeout_seconds": self.startup_timeout_seconds,
+            "eager_start": self.eager_start,
             "pid": self.process.pid if self.process and self.is_running() else None,
         }
 

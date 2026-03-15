@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     # 推理引擎配置
     INFERENCE_ENGINE_PATH: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama"
     # 可选：指定模型目录（绝对路径，或相对 INFERENCE_ENGINE_PATH/models 的目录名）
-    # INFERENCE_MODEL_DIR: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-1.5B-Instruct"
-    INFERENCE_MODEL_DIR: str = ""
+    INFERENCE_MODEL_DIR: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-1.5B-Instruct"
+    # INFERENCE_MODEL_DIR: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B"
     # 可选：指定模型文件（绝对路径，或相对 INFERENCE_ENGINE_PATH/models 的路径）
     INFERENCE_MODEL_PATH: str = ""
     # 可选：指定 tokenizer 文件（绝对路径，或相对 INFERENCE_ENGINE_PATH/models 的路径）
