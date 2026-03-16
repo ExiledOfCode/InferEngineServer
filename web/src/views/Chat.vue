@@ -192,21 +192,108 @@
               <span class="label">阶段</span>
               <pre class="value">{{ (step.operations || []).join(' → ') || 'attention → hidden_states → logits' }}</pre>
             </div>
-            <div class="trace-field" v-if="(step.operator_profile || []).length > 0">
-              <span class="label">算子流程图</span>
-              <div class="op-flow">
-                <div
-                  v-for="(row, rowIdx) in transformerFlowRows"
-                  :key="`flow-row-${rowIdx}`"
-                  class="flow-row"
-                >
-                  <template v-for="(node, nodeIdx) in row" :key="`flow-node-${rowIdx}-${nodeIdx}`">
-                    <div class="flow-node">
-                      <span class="flow-node-name">{{ node.label }}</span>
-                      <span class="flow-node-time">{{ formatDuration(flowNodeDuration(step, node.keys)) }}</span>
+            <div class="trace-field">
+              <span class="label">Qwen2 逻辑流程图</span>
+              <div class="logic-flow">
+                <div class="logic-main-row">
+                  <div class="logic-node logic-node-input">
+                    <span class="logic-node-title">x</span>
+                  </div>
+                  <span class="logic-arrow">↓</span>
+
+                  <div class="logic-node">
+                    <span class="logic-node-title">RMSNorm</span>
+                    <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'rmsnorm1')) }}</span>
+                  </div>
+                  <span class="logic-arrow">↓</span>
+
+                  <div class="logic-block">
+                    <div class="logic-block-head">
+                      <span class="logic-block-title">Attention</span>
+                      <span class="logic-block-time">{{ formatDuration(logicalNodeDuration(step, 'attention')) }}</span>
                     </div>
-                    <span v-if="nodeIdx < row.length - 1" class="flow-arrow">→</span>
-                  </template>
+                    <div class="logic-sub-row">
+                      <div class="logic-parallel-group">
+                        <span class="logic-parallel-tag">并行</span>
+                        <div class="logic-node logic-node-sub">
+                          <span class="logic-node-title">Wq</span>
+                          <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'wq')) }}</span>
+                        </div>
+                        <div class="logic-node logic-node-sub">
+                          <span class="logic-node-title">Wk</span>
+                          <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'wk')) }}</span>
+                        </div>
+                        <div class="logic-node logic-node-sub">
+                          <span class="logic-node-title">Wv</span>
+                          <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'wv')) }}</span>
+                        </div>
+                      </div>
+                      <span class="logic-arrow logic-arrow-sub">↓</span>
+                      <div class="logic-node logic-node-sub">
+                        <span class="logic-node-title">RoPE</span>
+                        <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'rope')) }}</span>
+                      </div>
+                      <span class="logic-arrow logic-arrow-sub">↓</span>
+                      <div class="logic-node logic-node-sub">
+                        <span class="logic-node-title">Attention(Q,K,V)</span>
+                        <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'mha')) }}</span>
+                      </div>
+                      <span class="logic-arrow logic-arrow-sub">↓</span>
+                      <div class="logic-node logic-node-sub">
+                        <span class="logic-node-title">Wo</span>
+                        <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'wo')) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="logic-arrow">↓</span>
+
+                  <div class="logic-node">
+                    <span class="logic-node-title">Residual Add</span>
+                    <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'residual1')) }}</span>
+                  </div>
+                  <span class="logic-arrow">↓</span>
+
+                  <div class="logic-node">
+                    <span class="logic-node-title">RMSNorm</span>
+                    <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'rmsnorm2')) }}</span>
+                  </div>
+                  <span class="logic-arrow">↓</span>
+
+                  <div class="logic-block">
+                    <div class="logic-block-head">
+                      <span class="logic-block-title">FFN (SwiGLU)</span>
+                      <span class="logic-block-time">{{ formatDuration(logicalNodeDuration(step, 'ffn')) }}</span>
+                    </div>
+                    <div class="logic-sub-row">
+                      <div class="logic-parallel-group">
+                        <span class="logic-parallel-tag">并行</span>
+                        <div class="logic-node logic-node-sub">
+                          <span class="logic-node-title">W1</span>
+                          <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'w1')) }}</span>
+                        </div>
+                        <div class="logic-node logic-node-sub">
+                          <span class="logic-node-title">W3</span>
+                          <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'w3')) }}</span>
+                        </div>
+                      </div>
+                      <span class="logic-arrow logic-arrow-sub">↓</span>
+                      <div class="logic-node logic-node-sub">
+                        <span class="logic-node-title">SwiGLU</span>
+                        <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'swiglu')) }}</span>
+                      </div>
+                      <span class="logic-arrow logic-arrow-sub">↓</span>
+                      <div class="logic-node logic-node-sub">
+                        <span class="logic-node-title">W2</span>
+                        <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'w2')) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="logic-arrow">↓</span>
+
+                  <div class="logic-node">
+                    <span class="logic-node-title">Residual Add</span>
+                    <span class="logic-node-time">{{ formatDuration(logicalNodeDuration(step, 'residual2')) }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -315,29 +402,24 @@ const traceSidebarStyle = computed(() => {
   }
   return { width: `${traceSidebarWidth.value}px` }
 })
-const transformerFlowRows = [
-  [
-    { label: 'Embedding', keys: ['input.embedding'] },
-    { label: 'Attn RMSNorm', keys: ['attn.rmsnorm'] },
-    { label: 'Wq/Wk/Wv', keys: ['attn.wq', 'attn.wk', 'attn.wv'] },
-    { label: 'RoPE', keys: ['attn.rope'] },
-    { label: 'MHA', keys: ['attn.mha'] },
-    { label: 'Wo', keys: ['attn.wo'] }
-  ],
-  [
-    { label: 'Add(Residual-1)', keys: ['ffn.residual_add1'] },
-    { label: 'FFN RMSNorm', keys: ['ffn.rmsnorm'] },
-    { label: 'W1 + W3', keys: ['ffn.w1', 'ffn.w3'] },
-    { label: 'SwiGLU', keys: ['ffn.swiglu'] },
-    { label: 'W2', keys: ['ffn.w2'] },
-    { label: 'Add(Residual-2)', keys: ['ffn.residual_add2'] }
-  ],
-  [
-    { label: 'Output RMSNorm', keys: ['output.rmsnorm'] },
-    { label: 'CLS', keys: ['output.cls'] },
-    { label: 'Sampler', keys: ['sampler.argmax'] }
-  ]
-]
+const logicalNodeOps = {
+  rmsnorm1: ['attn.rmsnorm'],
+  attention: ['attn.wq', 'attn.wk', 'attn.wv', 'attn.rope', 'attn.mha', 'attn.wo'],
+  wq: ['attn.wq'],
+  wk: ['attn.wk'],
+  wv: ['attn.wv'],
+  rope: ['attn.rope'],
+  mha: ['attn.mha'],
+  wo: ['attn.wo'],
+  residual1: ['ffn.residual_add1'],
+  rmsnorm2: ['ffn.rmsnorm'],
+  ffn: ['ffn.w1', 'ffn.w3', 'ffn.swiglu', 'ffn.w2'],
+  w1: ['ffn.w1'],
+  w3: ['ffn.w3'],
+  swiglu: ['ffn.swiglu'],
+  w2: ['ffn.w2'],
+  residual2: ['ffn.residual_add2']
+}
 
 function formatErrorMessage(error, fallback) {
   const detail = error?.detail || fallback
@@ -444,10 +526,15 @@ function samplingRemainingCount(step) {
 function flowNodeDuration(step, opKeys) {
   const profile = Array.isArray(step?.operator_profile) ? step.operator_profile : []
   if (!Array.isArray(opKeys) || opKeys.length === 0 || profile.length === 0) {
-    return 0
+    return undefined
   }
   const table = new Map(profile.map(item => [item.name, Number(item.total_ms || 0)]))
   return opKeys.reduce((acc, key) => acc + (table.get(key) || 0), 0)
+}
+
+function logicalNodeDuration(step, nodeId) {
+  const keys = logicalNodeOps[nodeId]
+  return flowNodeDuration(step, keys)
 }
 
 onMounted(async () => {
@@ -1259,52 +1346,140 @@ function handleLogout() {
   border-style: dashed;
 }
 
-.op-flow {
+.logic-flow {
   border: 1px solid #dce6f5;
   border-radius: 9px;
   background: #f8fbff;
   padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  overflow-x: hidden;
 }
 
-.flow-row {
+.logic-main-row {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  width: 100%;
   padding-bottom: 2px;
 }
 
-.flow-node {
-  min-width: 102px;
+.logic-arrow {
+  align-self: center;
+  color: #6f85a7;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.logic-arrow-sub {
+  font-size: 11px;
+}
+
+.logic-node {
+  width: 100%;
   border: 1px solid #d2deef;
   border-radius: 8px;
   background: #ffffff;
-  padding: 5px 6px;
-  display: inline-flex;
+  padding: 6px 7px;
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  justify-content: center;
 }
 
-.flow-node-name {
+.logic-node-input {
+  width: fit-content;
+  min-width: 52px;
+  padding-left: 14px;
+  padding-right: 14px;
+  align-self: center;
+  align-items: center;
+}
+
+.logic-node-sub {
+  width: 100%;
+}
+
+.logic-node-title {
   font-size: 11px;
   color: #1f304a;
   font-weight: 650;
   line-height: 1.25;
 }
 
-.flow-node-time {
+.logic-node-time {
   font-size: 11px;
   color: #375f8c;
+  line-height: 1.2;
 }
 
-.flow-arrow {
-  color: #6f85a7;
-  font-size: 12px;
-  flex-shrink: 0;
+.logic-block {
+  width: 100%;
+  border: 1px solid #c9d7ef;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f4f8ff 0%, #ffffff 100%);
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.logic-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px dashed #d7e1f1;
+  padding-bottom: 5px;
+}
+
+.logic-block-title {
+  font-size: 11px;
+  color: #1b3359;
+  font-weight: 700;
+}
+
+.logic-block-time {
+  font-size: 11px;
+  color: #245189;
+  font-weight: 600;
+}
+
+.logic-sub-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.logic-parallel-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  border: 1px dashed #cfdbef;
+  background: rgba(231, 239, 252, 0.6);
+}
+
+.logic-parallel-group .logic-node-sub {
+  width: auto;
+  min-width: 88px;
+  flex: 1 1 88px;
+}
+
+.logic-parallel-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #d9e8ff;
+  color: #244b7d;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .op-table {
