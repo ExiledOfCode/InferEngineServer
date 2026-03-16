@@ -20,11 +20,13 @@ mysql -u root -p < server/sql/init.sql
 # 3. 启动后端
 cd server/backend
 pip install -r requirements.txt
+cd server/backend
 python run.py
 
 # 4. 启动前端（新终端）
 cd server/web
 npm install
+cd server/web
 npm run dev -- --host
 
 # 5. 访问

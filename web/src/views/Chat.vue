@@ -56,9 +56,6 @@
 
     <section class="chat-main">
       <header class="chat-header">
-        <button class="menu-btn" @click="toggleSidebar">
-          <el-icon><Menu /></el-icon>
-        </button>
         <div class="header-meta">
           <h1>{{ currentTitle }}</h1>
           <p>江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}</p>
@@ -566,24 +563,6 @@ function handleLogout() {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.menu-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: #f7f9fc;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.menu-btn:hover {
-  border-color: #bcc7d8;
-  background: #eef2f8;
 }
 
 .header-meta {
