@@ -86,8 +86,10 @@ export const useChatStore = defineStore('chat', () => {
   const currentConversation = ref(null)
   const messages = ref([])
   const loading = ref(false)
+  const loadingConversationId = ref(null)
   const creatingConversation = ref(false)
   const inferenceStatus = ref(null)
+  const inferenceTrace = ref(null)
 
   async function fetchConversations() {
     conversations.value = await chatApi.getConversations()
@@ -142,6 +144,11 @@ export const useChatStore = defineStore('chat', () => {
     return inferenceStatus.value
   }
 
+  async function fetchInferenceTrace() {
+    inferenceTrace.value = await chatApi.getInferenceTrace()
+    return inferenceTrace.value
+  }
+
   async function sendMessage(content) {
     if (!currentConversation.value) {
       await createConversation()
@@ -156,9 +163,23 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push(tempUserMessage)
     loading.value = true
+    loadingConversationId.value = convId
+    let traceTimer = null
+    const pollTrace = async () => {
+      try {
+        await fetchInferenceTrace()
+      } catch {
+        // ignore trace polling errors
+      }
+    }
+    await pollTrace()
+    traceTimer = window.setInterval(pollTrace, 700)
 
     try {
       const response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content))
+      if (response?.inference_trace) {
+        inferenceTrace.value = response.inference_trace
+      }
       // 优先以后端数据库为准回拉，避免前后端状态漂移
       try {
         messages.value = normalizeMessages(await chatApi.getMessages(convId))
@@ -183,12 +204,22 @@ export const useChatStore = defineStore('chat', () => {
       })
       ElMessage.error(detail)
     } finally {
+      if (traceTimer) {
+        window.clearInterval(traceTimer)
+        traceTimer = null
+      }
+      try {
+        await fetchInferenceTrace()
+      } catch {
+        // ignore final trace refresh
+      }
       try {
         await fetchInferenceStatus()
       } catch {
         // ignore status refresh failure
       }
       loading.value = false
+      loadingConversationId.value = null
     }
   }
 
@@ -197,13 +228,16 @@ export const useChatStore = defineStore('chat', () => {
     currentConversation,
     messages,
     loading,
+    loadingConversationId,
     creatingConversation,
     inferenceStatus,
+    inferenceTrace,
     fetchConversations,
     createConversation,
     deleteConversation,
     selectConversation,
     fetchInferenceStatus,
+    fetchInferenceTrace,
     sendMessage
   }
 })

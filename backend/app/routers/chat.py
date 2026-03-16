@@ -7,7 +7,7 @@ from ..models.user import User
 from ..models.conversation import Conversation
 from ..models.message import Message
 from ..schemas.conversation import ConversationCreate, ConversationResponse
-from ..schemas.message import MessageCreate, MessageResponse
+from ..schemas.message import MessageCreate, MessageResponse, MessageWithTraceResponse
 from ..utils.security import get_current_chat_user
 from ..services.inference_service import inference_service
 
@@ -17,6 +17,12 @@ router = APIRouter()
 def get_inference_status(current_user: User = Depends(get_current_chat_user)):
     """查看推理链路状态（调试用）"""
     return inference_service.debug_status()
+
+
+@router.get("/inference/trace")
+def get_inference_trace(current_user: User = Depends(get_current_chat_user)):
+    """查看最近一次推理的阶段埋点"""
+    return inference_service.trace_status()
 
 @router.get("/conversations", response_model=List[ConversationResponse])
 def get_conversations(db: Session = Depends(get_db), current_user: User = Depends(get_current_chat_user)):
@@ -82,7 +88,7 @@ def get_messages(
     
     return messages
 
-@router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
+@router.post("/conversations/{conversation_id}/messages", response_model=MessageWithTraceResponse)
 def send_message(
     conversation_id: int,
     data: MessageCreate,
@@ -143,4 +149,11 @@ def send_message(
     db.commit()
     db.refresh(assistant_message)
     
-    return assistant_message
+    return MessageWithTraceResponse(
+        id=assistant_message.id,
+        conversation_id=assistant_message.conversation_id,
+        role=assistant_message.role,
+        content=assistant_message.content,
+        created_at=assistant_message.created_at,
+        inference_trace=inference_service.trace_status(),
+    )

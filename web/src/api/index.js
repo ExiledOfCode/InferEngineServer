@@ -176,7 +176,8 @@ export const chatApi = {
   deleteConversation: (id) => api.delete(`/conversations/${id}`),
   getMessages: (id) => api.get(`/conversations/${id}/messages`),
   sendMessage: (id, content) => api.post(`/conversations/${id}/messages`, { content }),
-  getInferenceStatus: () => api.get('/inference/status')
+  getInferenceStatus: () => api.get('/inference/status'),
+  getInferenceTrace: () => api.get('/inference/trace')
 }
 
 export default api

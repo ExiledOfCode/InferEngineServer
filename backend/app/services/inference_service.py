@@ -1,9 +1,11 @@
 import os
 import queue
+import json
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional
+from copy import deepcopy
+from typing import Any, Dict, List, Optional
 
 from ..config import settings
 
@@ -23,7 +25,10 @@ class InferenceService:
         self.stdout_reader: Optional[threading.Thread] = None
         self.lock = threading.Lock()
         self.counter_lock = threading.Lock()
+        self.trace_lock = threading.Lock()
         self.request_counter = 0
+        self.current_trace: Optional[Dict[str, Any]] = None
+        self.last_trace: Optional[Dict[str, Any]] = None
 
         legacy_max_steps = self._read_optional_positive_int("INFERENCE_MAX_STEPS")
         default_max_new_tokens = legacy_max_steps if legacy_max_steps is not None else 128
@@ -101,6 +106,253 @@ class InferenceService:
         with self.counter_lock:
             self.request_counter += 1
             return self.request_counter
+
+    @staticmethod
+    def _truncate_text(text: str, limit: int = 320) -> str:
+        value = str(text or "").strip()
+        if len(value) <= limit:
+            return value
+        if limit <= 3:
+            return value[:limit]
+        return value[: limit - 3] + "..."
+
+    @staticmethod
+    def _trace_step_title(step_id: str) -> str:
+        mapping = {
+            "tokenization": "Step1: Tokenization",
+            "encoding": "Step2: Encoding",
+            "transformer": "Step3: Transformer Inference",
+            "sampling": "Step4: Sampling",
+            "decode": "Step5: Decode",
+        }
+        return mapping.get(step_id, step_id)
+
+    def _init_trace(self, req_id: int, prompt: str, history_size: int, prompt_format: str):
+        trace = {
+            "request_id": req_id,
+            "state": "running",
+            "started_at": time.time(),
+            "updated_at": time.time(),
+            "history_size": int(history_size),
+            "prompt_format": prompt_format,
+            "prompt_preview": self._truncate_text(prompt, 280),
+            "steps": [],
+        }
+        with self.trace_lock:
+            self.current_trace = trace
+            self.last_trace = deepcopy(trace)
+
+    @staticmethod
+    def _step_order(step_id: str) -> int:
+        ordering = {
+            "tokenization": 1,
+            "encoding": 2,
+            "transformer": 3,
+            "sampling": 4,
+            "decode": 5,
+        }
+        return ordering.get(step_id, 99)
+
+    def _upsert_trace_step(self, trace: Dict[str, Any], step_id: str, title: Optional[str] = None) -> Dict[str, Any]:
+        steps = trace.setdefault("steps", [])
+        for step in steps:
+            if step.get("id") == step_id:
+                if title:
+                    step["title"] = title
+                return step
+
+        step = {
+            "id": step_id,
+            "title": title or self._trace_step_title(step_id),
+            "updated_at": time.time(),
+        }
+        steps.append(step)
+        steps.sort(key=lambda item: self._step_order(str(item.get("id") or "")))
+        return step
+
+    def _apply_trace_event(self, event: Dict[str, Any]):
+        step_id = str(event.get("step") or "").strip().lower()
+        if not step_id:
+            return
+
+        with self.trace_lock:
+            if not self.current_trace:
+                return
+            trace = self.current_trace
+            trace["updated_at"] = time.time()
+
+            if step_id == "done":
+                duration = event.get("duration_seconds")
+                if isinstance(duration, (int, float)):
+                    trace["duration_seconds"] = float(duration)
+                generated_steps = event.get("generated_steps")
+                if isinstance(generated_steps, (int, float)):
+                    trace["generated_steps"] = int(generated_steps)
+                self.last_trace = deepcopy(trace)
+                return
+
+            step = self._upsert_trace_step(trace, step_id, str(event.get("title") or "").strip() or None)
+            step["updated_at"] = time.time()
+            if isinstance(event.get("duration_ms"), (int, float)):
+                step["duration_ms"] = float(event.get("duration_ms"))
+
+            if step_id == "tokenization":
+                if isinstance(event.get("input_text"), str):
+                    step["input_text"] = self._truncate_text(event["input_text"], 320)
+                if isinstance(event.get("tokens_preview"), list):
+                    step["tokens_preview"] = [self._truncate_text(item, 48) for item in event["tokens_preview"][:32]]
+                if isinstance(event.get("token_count"), (int, float)):
+                    step["token_count"] = int(event["token_count"])
+                if "truncated" in event:
+                    step["truncated"] = bool(event.get("truncated"))
+            elif step_id == "encoding":
+                if isinstance(event.get("token_ids_preview"), list):
+                    values = []
+                    for item in event["token_ids_preview"][:64]:
+                        try:
+                            values.append(int(item))
+                        except Exception:
+                            continue
+                    step["token_ids_preview"] = values
+                if isinstance(event.get("token_count"), (int, float)):
+                    step["token_count"] = int(event["token_count"])
+                if "truncated" in event:
+                    step["truncated"] = bool(event.get("truncated"))
+            elif step_id == "transformer":
+                if isinstance(event.get("operations"), list):
+                    step["operations"] = [str(item) for item in event["operations"][:12]]
+                if isinstance(event.get("status"), str):
+                    step["status"] = event["status"]
+                if isinstance(event.get("operator_count"), (int, float)):
+                    step["operator_count"] = int(event["operator_count"])
+                if isinstance(event.get("operator_profile"), list):
+                    profile_rows = []
+                    for item in event["operator_profile"][:128]:
+                        if not isinstance(item, dict):
+                            continue
+                        name = str(item.get("name") or "").strip()
+                        if not name:
+                            continue
+                        total_ms_raw = item.get("total_ms")
+                        avg_ms_raw = item.get("avg_ms")
+                        calls_raw = item.get("calls")
+                        try:
+                            total_ms = float(total_ms_raw) if isinstance(total_ms_raw, (int, float)) else 0.0
+                        except Exception:
+                            total_ms = 0.0
+                        try:
+                            avg_ms = float(avg_ms_raw) if isinstance(avg_ms_raw, (int, float)) else 0.0
+                        except Exception:
+                            avg_ms = 0.0
+                        try:
+                            calls = int(calls_raw) if isinstance(calls_raw, (int, float)) else 0
+                        except Exception:
+                            calls = 0
+                        profile_rows.append(
+                            {
+                                "name": name,
+                                "total_ms": total_ms,
+                                "calls": calls,
+                                "avg_ms": avg_ms,
+                            }
+                        )
+                    profile_rows.sort(key=lambda row: row.get("total_ms", 0.0), reverse=True)
+                    step["operator_profile"] = profile_rows
+            elif step_id == "sampling":
+                if isinstance(event.get("sampler"), str):
+                    step["sampler"] = event["sampler"]
+                if isinstance(event.get("generated_token_count"), (int, float)):
+                    step["generated_token_count"] = int(event["generated_token_count"])
+                selected_token = event.get("selected_token")
+                selected_token_id = event.get("selected_token_id")
+                if selected_token is not None or selected_token_id is not None:
+                    selected_list = step.setdefault("selected_tokens", [])
+                    selected_list.append(
+                        {
+                            "token": self._truncate_text(str(selected_token or ""), 64),
+                            "token_id": int(selected_token_id) if isinstance(selected_token_id, (int, float)) else None,
+                            "index": int(event.get("sample_index")) if isinstance(event.get("sample_index"), (int, float)) else None,
+                        }
+                    )
+                    if len(selected_list) > 24:
+                        step["selected_tokens"] = selected_list[-24:]
+            elif step_id == "decode":
+                if isinstance(event.get("generated_text_preview"), str):
+                    step["generated_text_preview"] = self._truncate_text(event["generated_text_preview"], 380)
+                if isinstance(event.get("generated_char_count"), (int, float)):
+                    step["generated_char_count"] = int(event["generated_char_count"])
+
+            self.last_trace = deepcopy(trace)
+
+    def _consume_trace_line(self, line: str) -> bool:
+        text = str(line or "").strip()
+        if not text.startswith("[TRACE]"):
+            return False
+
+        payload_text = text[len("[TRACE]") :].strip()
+        if not payload_text:
+            return True
+
+        try:
+            payload = json.loads(payload_text)
+        except Exception:
+            self._apply_trace_event(
+                {
+                    "step": "transformer",
+                    "title": "Step3: Transformer Inference",
+                    "status": "running",
+                }
+            )
+            return True
+
+        if isinstance(payload, dict):
+            self._apply_trace_event(payload)
+        return True
+
+    def _consume_trace_block(self, stdout: str):
+        if not stdout:
+            return
+        for raw_line in str(stdout).splitlines():
+            self._consume_trace_line(raw_line)
+
+    def _complete_trace(self, state: str, response_text: str = "", error: str = "", elapsed: Optional[float] = None):
+        now = time.time()
+        with self.trace_lock:
+            trace = self.current_trace or self.last_trace
+            if not trace:
+                trace = {
+                    "request_id": self.request_counter,
+                    "state": state,
+                    "started_at": now,
+                    "updated_at": now,
+                    "steps": [],
+                }
+            trace["state"] = state
+            trace["updated_at"] = now
+            trace["finished_at"] = now
+            if elapsed is not None:
+                trace["elapsed_seconds"] = float(elapsed)
+            if response_text:
+                trace["response_preview"] = self._truncate_text(response_text, 380)
+            if error:
+                trace["error"] = self._truncate_text(error, 380)
+            self.last_trace = deepcopy(trace)
+            self.current_trace = None
+
+    def trace_status(self) -> Dict[str, Any]:
+        with self.trace_lock:
+            trace = deepcopy(self.current_trace if self.current_trace else self.last_trace)
+
+        if not trace:
+            return {"state": "idle", "steps": []}
+
+        steps = trace.get("steps")
+        if isinstance(steps, list):
+            trace["steps"] = sorted(
+                steps,
+                key=lambda item: self._step_order(str((item or {}).get("id") or "")),
+            )
+        return trace
 
     def _detect_model(self):
         build_demo_path = os.path.join(self.engine_path, "build", "demo")
@@ -544,6 +796,12 @@ class InferenceService:
             f"prompt_chars={len(model_prompt)} max_new_tokens={self.max_new_tokens} "
             f"prompt_format={effective_prompt_format}"
         )
+        self._init_trace(
+            req_id=req_id,
+            prompt=prompt,
+            history_size=len(safe_history),
+            prompt_format=effective_prompt_format,
+        )
 
         if not self.is_running():
             self._start_engine()
@@ -555,6 +813,18 @@ class InferenceService:
             response = self._generate_once(model_prompt)
 
         elapsed = time.monotonic() - start_time
+        failed = (
+            response.startswith("推理超时")
+            or response.startswith("推理请求发送失败")
+            or response.startswith("推理进程")
+            or response.startswith("推理异常")
+        )
+        self._complete_trace(
+            state="error" if failed else "completed",
+            response_text=response,
+            error=response if failed else "",
+            elapsed=elapsed,
+        )
         print(f"[Inference][{req_id}] done: elapsed={elapsed:.2f}s response_chars={len(response)}")
         return response
 
@@ -699,6 +969,8 @@ class InferenceService:
                     return "推理进程已退出，请重试。"
 
                 text = line.rstrip("\n")
+                if self._consume_trace_line(text):
+                    continue
                 if text == "[RESPONSE_START]":
                     in_response = True
                     continue
@@ -738,6 +1010,7 @@ class InferenceService:
                 detail = detail[:1200] + "\n...(truncated)"
             return f"推理进程失败（退出码 {completed.returncode}）:\n{detail or '无错误输出'}"
 
+        self._consume_trace_block(completed.stdout)
         response = self._extract_response(completed.stdout)
         response = self._sanitize_response_text(response)
         if response:
@@ -764,6 +1037,8 @@ class InferenceService:
             if line in {start_marker, end_marker}:
                 continue
             if line.startswith("[STATS]"):
+                continue
+            if line.startswith("[TRACE]"):
                 continue
             if line.startswith("steps:") or line.startswith("duration:") or line.startswith("steps/s:"):
                 continue
@@ -825,6 +1100,7 @@ class InferenceService:
             "startup_timeout_seconds": self.startup_timeout_seconds,
             "eager_start": self.eager_start,
             "pid": self.process.pid if self.process and self.is_running() else None,
+            "trace_state": self.trace_status().get("state", "idle"),
         }
 
     def _mock_response(self, prompt: str) -> str:
