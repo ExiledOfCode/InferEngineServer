@@ -1,10 +1,14 @@
 <template>
   <div class="chat-shell">
-    <aside class="chat-sidebar" :class="{ show: mobileSidebarOpen }">
+    <aside class="chat-sidebar" :class="{ show: mobileSidebarOpen, collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
-        <button class="new-chat-btn" @click="handleNewChat">
+        <button class="new-chat-btn" :disabled="chatStore.creatingConversation" @click="handleNewChat">
           <el-icon><Plus /></el-icon>
-          <span>新对话</span>
+          <span v-if="!sidebarCollapsed">新对话</span>
+        </button>
+        <button class="sidebar-toggle" title="收起侧边栏" @click="toggleSidebar">
+          <el-icon v-if="sidebarCollapsed"><Expand /></el-icon>
+          <el-icon v-else><Fold /></el-icon>
         </button>
         <button class="sidebar-close" @click="mobileSidebarOpen = false">
           <el-icon><CloseBold /></el-icon>
@@ -13,7 +17,7 @@
 
       <div class="engine-status" :class="{ online: !!chatStore.inferenceStatus?.running }">
         <span class="status-dot"></span>
-        <span>推理引擎 {{ chatStore.inferenceStatus?.running ? '在线' : '离线' }}</span>
+        <span v-if="!sidebarCollapsed">推理引擎 {{ chatStore.inferenceStatus?.running ? '在线' : '离线' }}</span>
       </div>
 
       <div class="conversation-list">
@@ -25,22 +29,23 @@
           @click="handleSelectConversation(conv.id)"
         >
           <el-icon class="conv-icon"><ChatDotRound /></el-icon>
-          <div class="conversation-text">
+          <div v-if="!sidebarCollapsed" class="conversation-text">
             <span class="conv-title">{{ conv.title || '新对话' }}</span>
             <span class="conv-time">{{ formatConversationTime(conv.updated_at || conv.created_at) }}</span>
           </div>
-          <el-icon class="delete-btn" @click.stop="handleDelete(conv.id)"><Delete /></el-icon>
+          <el-icon v-if="!sidebarCollapsed" class="delete-btn" @click.stop="handleDelete(conv.id)"><Delete /></el-icon>
         </button>
       </div>
 
-      <div class="user-panel">
-        <div class="user-meta">
+      <div class="user-panel" :class="{ collapsed: sidebarCollapsed }">
+        <div v-if="!sidebarCollapsed" class="user-meta">
           <div class="avatar">{{ (authStore.user?.username || 'U').slice(0, 1).toUpperCase() }}</div>
           <div class="name-block">
             <span class="name">{{ authStore.user?.username }}</span>
             <span class="role">Chat User</span>
           </div>
         </div>
+        <div v-else class="avatar">{{ (authStore.user?.username || 'U').slice(0, 1).toUpperCase() }}</div>
         <button class="logout-btn" @click="handleLogout" title="退出登录">
           <el-icon><SwitchButton /></el-icon>
         </button>
@@ -51,14 +56,13 @@
 
     <section class="chat-main">
       <header class="chat-header">
-        <button class="menu-btn" @click="mobileSidebarOpen = true">
+        <button class="menu-btn" @click="toggleSidebar">
           <el-icon><Menu /></el-icon>
         </button>
         <div class="header-meta">
           <h1>{{ currentTitle }}</h1>
           <p>江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}</p>
         </div>
-        <button class="ghost-btn" @click="handleNewChat">新建</button>
       </header>
 
       <main class="message-list" ref="messageListRef">
@@ -134,6 +138,7 @@ const inputMessage = ref('')
 const inputRef = ref(null)
 const messageListRef = ref(null)
 const mobileSidebarOpen = ref(false)
+const sidebarCollapsed = ref(false)
 let statusTimer = null
 
 const currentTitle = computed(() => chatStore.currentConversation?.title || '新对话')
@@ -167,11 +172,22 @@ function scrollToBottom() {
 function handleWindowResize() {
   if (window.innerWidth > 960) {
     mobileSidebarOpen.value = false
+  } else {
+    sidebarCollapsed.value = false
   }
+}
+
+function toggleSidebar() {
+  if (window.innerWidth <= 960) {
+    mobileSidebarOpen.value = !mobileSidebarOpen.value
+    return
+  }
+  sidebarCollapsed.value = !sidebarCollapsed.value
 }
 
 onMounted(async () => {
   window.addEventListener('resize', handleWindowResize)
+  handleWindowResize()
   try {
     await chatStore.fetchConversations()
   } catch (e) {
@@ -270,6 +286,12 @@ function handleLogout() {
   border-right: 1px solid var(--border-subtle);
   background: var(--surface-sidebar);
   z-index: 12;
+  transition: width 0.22s ease, padding 0.22s ease;
+}
+
+.chat-sidebar.collapsed {
+  width: 84px;
+  padding: 14px 10px;
 }
 
 .sidebar-header {
@@ -300,6 +322,35 @@ function handleLogout() {
   border-color: #aebad0;
 }
 
+.new-chat-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-sidebar.collapsed .new-chat-btn {
+  flex: unset;
+  width: 42px;
+  padding: 0;
+}
+
+.sidebar-toggle {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: #f6f8fb;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  border-color: #bcc7d8;
+  background: #f3f6fb;
+}
+
 .sidebar-close {
   display: none;
   width: 38px;
@@ -322,6 +373,11 @@ function handleLogout() {
   gap: 8px;
   padding: 0 12px;
   font-size: 13px;
+}
+
+.chat-sidebar.collapsed .engine-status {
+  justify-content: center;
+  padding: 0;
 }
 
 .status-dot {
@@ -365,6 +421,11 @@ function handleLogout() {
   text-align: left;
   cursor: pointer;
   transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.chat-sidebar.collapsed .conversation-item {
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .conversation-item:hover {
@@ -424,6 +485,12 @@ function handleLogout() {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.user-panel.collapsed {
+  justify-content: center;
+  padding: 8px 6px;
+  flex-direction: column;
 }
 
 .user-meta {
@@ -502,7 +569,9 @@ function handleLogout() {
 }
 
 .menu-btn {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -510,6 +579,11 @@ function handleLogout() {
   background: #f7f9fc;
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+.menu-btn:hover {
+  border-color: #bcc7d8;
+  background: #eef2f8;
 }
 
 .header-meta {
@@ -530,22 +604,6 @@ function handleLogout() {
   margin-top: 2px;
   color: var(--text-muted);
   font-size: 12px;
-}
-
-.ghost-btn {
-  min-width: 64px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: #fff;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.ghost-btn:hover {
-  border-color: #b8c3d5;
 }
 
 .message-list {
@@ -756,6 +814,10 @@ function handleLogout() {
     justify-content: center;
   }
 
+  .sidebar-toggle {
+    display: none;
+  }
+
   .sidebar-mask {
     display: block;
     position: fixed;
@@ -764,18 +826,8 @@ function handleLogout() {
     z-index: 10;
   }
 
-  .menu-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .chat-header {
     padding: 0 14px;
-  }
-
-  .ghost-btn {
-    display: none;
   }
 
   .message-track,

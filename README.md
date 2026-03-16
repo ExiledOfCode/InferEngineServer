@@ -1,60 +1,58 @@
-# AI 对话平台
-
-基于 Vue 3 + FastAPI + MySQL 的 AI 对话平台。
-
+# 启动平台
 ## 项目结构
 
-```
+```text
 server/
 ├── backend/          # Python FastAPI 后端
 ├── web/              # Vue 3 前端
 └── sql/              # 数据库初始化脚本
 ```
 
-## 快速开始
-
-### 1. 初始化数据库
+## 启动平台
 
 ```bash
-# 登录 MySQL
-mysql -u root -p
+# 1. 修改 config 文件
+# server/backend/app/config.py
 
-# 执行初始化脚本
-source server/sql/init.sql
-```
+# 2. 初始化数据库（在仓库根目录执行）
+mysql -u root -p < server/sql/init.sql
 
-### 2. 启动后端
-
-```bash
+# 3. 启动后端
 cd server/backend
-
-# 安装依赖
 pip install -r requirements.txt
-
-cd server/backend
-
-# 启动服务
 python run.py
+
+# 4. 启动前端（新终端）
+cd server/web
+npm install
+npm run dev -- --host
+
+# 5. 访问
+# 前端: http://localhost:5173
+# 后端 API 文档: http://localhost:8000/docs
 ```
 
-后端服务运行在 http://localhost:8000
+## 默认账号
 
-### 3. 启动前端
+| 角色 | 用户名 | 密码 |
+|------|--------|------|
+| 管理员 | admin | admin |
+
+## 配置前端
 
 ```bash
-cd server/web
+# Vue 3 / Node.js 20
+apt update
+apt install -y curl ca-certificates
 
-# 安装依赖
-npm install
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt install -y nodejs
+node -v
+npm -v
 
-
-cd server/web
-
-# 启动开发服务器
-npm run dev -- --host
+npm install -g pnpm
+pnpm -v
 ```
-
-前端服务运行在 http://localhost:5173
 
 可选前端环境变量（`server/web/.env`）：
 
@@ -72,20 +70,26 @@ VITE_PROXY_TARGET=http://127.0.0.1:8000
 说明：
 
 - 若未设置 `VITE_API_BASE_URL`，前端会先请求 `/api`（适合 `npm run dev` 走 Vite proxy）。
-- 当 `/api` 不通时，前端会自动回退到 `http://<当前主机>:8000/api`、`http://127.0.0.1:8000/api`、`http://localhost:8000/api`，用于 `vite preview` 或直接静态部署场景。
-- 建议排障时设置 `VITE_API_DEBUG=true`，浏览器控制台会打印实际请求地址与回退过程。
+- 当 `/api` 不通时，前端会自动回退到 `http://<当前主机>:8000/api`、`http://127.0.0.1:8000/api`、`http://localhost:8000/api`。
+- 排障时建议设置 `VITE_API_DEBUG=true`，浏览器控制台会打印实际请求地址与回退过程。
 
-## 默认账号
+## 配置后端
 
-| 角色 | 用户名 | 密码 |
-|------|--------|------|
-| 管理员 | admin | admin |
+```bash
+# MySQL
+apt update
+apt install -y mysql-server
+service mysql start
+mysql --version
+mysql -u root
 
-## 配置说明
+mysql
+ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
+FLUSH PRIVILEGES;
+EXIT;
+```
 
-### 后端配置
-
-编辑 `backend/app/config.py` 或创建 `.env` 文件：
+后端关键配置位于 `server/backend/app/config.py`（也支持 `.env`）：
 
 ```env
 DB_HOST=localhost
@@ -94,20 +98,23 @@ DB_USER=root
 DB_PASSWORD=123456
 DB_NAME=ai_chat
 SECRET_KEY=your-secret-key
+
 # 可选：逗号分隔的精确 Origin 白名单
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # 可选：Origin 正则（本地调试建议保留默认）
 CORS_ALLOW_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.\d+\.\d+)(:\d+)?$
+
 # 推理生成长度（默认 128，过小会导致回复很短）
 INFERENCE_MAX_NEW_TOKENS=128
-# 是否在后端启动时立即加载模型（默认 false，避免大模型拖慢/阻塞 API 启动）
+# 是否在后端启动时立即加载模型
 INFERENCE_EAGER_START=false
-# prompt 格式：auto（默认，Instruct 模型自动走 chatml）、chatml、raw
+# prompt 格式：auto / chatml / raw
 INFERENCE_PROMPT_FORMAT=auto
-# 可选：chatml 下的 system 提示词
+# chatml 模式系统提示词
 INFERENCE_SYSTEM_PROMPT=You are a helpful assistant.
-# raw 模式是否拼接历史上下文（默认 false）
+# raw 模式是否拼接历史上下文
 INFERENCE_RAW_WITH_HISTORY=false
+
 # 可选：指定模型目录（相对 INFERENCE_ENGINE_PATH/models）
 INFERENCE_MODEL_DIR=Qwen2.5-0.5B
 # 可选：直接指定模型文件（优先级高于 INFERENCE_MODEL_DIR）
@@ -116,11 +123,73 @@ INFERENCE_MODEL_DIR=Qwen2.5-0.5B
 # INFERENCE_TOKENIZER_PATH=/mnt/d/.../KuiperLLama/models/Qwen2.5-0.5B/tokenizer.json
 ```
 
-### 推理引擎配置
+## 配置推理框架
 
-修改 `backend/app/config.py` 中的 `INFERENCE_ENGINE_PATH` 指向你的推理引擎路径。
-当 `models/` 下存在多个模型时，推荐在 `config.py` 或 `.env` 中设置 `INFERENCE_MODEL_DIR` 来固定目标模型。
+```bash
+# armadillo
+cd ./armadillo
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j8
+make install
+./tests1/smoke_test
+
+# googletest
+cd ./googletest
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j8
+make install
+
+# glog
+cd ./glog
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DWITH_GFLAGS=OFF -DWITH_GTEST=OFF ..
+make -j8
+make install
+
+# sentencepiece
+cd ./sentencepiece
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j8
+make install
+
+# 安装 hf-hub 并导出模型
+pip3 install -U huggingface_hub
+huggingface-cli download --resume-download Qwen/Qwen2.5-0.5B --local-dir Qwen/Qwen2.5-0.5B --local-dir-use-symlinks False
+python3 tools/export_qwen2.py Qwen2.5-0.5B.bin --hf=Qwen/Qwen2.5-0.5B
+
+# 编译 server 使用的推理引擎
+mkdir build
+cd build
+cmake -DLLAMA2_SUPPORT=ON ..
+make -j16
+# make -j$(nproc)
+
+./build/demo/chat_server /workspace/Open_Source_Projects/MyInferenceEngine/KuiperLLama/Qwen2.5-0.5B.bin /workspace/Open_Source_Projects/MyInferenceEngine/KuiperLLama/Qwen/Qwen2.5-0.5B/tokenizer.json
+```
+
+## 配置 Clash
+
+```bash
+mkdir -p ~/.config/mihomo
+# 复制配置文件和数据库到默认目录
+cp config.yaml Country.mmdb ~/.config/mihomo/
+# 可选：复制日志文件（一般不需要，除非你想保留旧日志）
+cp mihomo.log ~/.config/mihomo/
+# 将可执行文件复制到用户 bin 目录（方便全局调用）
+mkdir -p ~/.local/bin
+cp mihomo ~/.local/bin/
+chmod +x ~/.local/bin/mihomo
+
+# 后台运行
+nohup ~/.local/bin/mihomo -d ~/.config/mihomo > ~/.config/mihomo/mihomo.log 2>&1 &
+
+# 查看是否成功
+ps aux | grep mihomo
+```
 
 ## API 文档
 
-启动后端后访问：http://localhost:8000/docs
+启动后端后访问：`http://localhost:8000/docs`

@@ -86,6 +86,7 @@ export const useChatStore = defineStore('chat', () => {
   const currentConversation = ref(null)
   const messages = ref([])
   const loading = ref(false)
+  const creatingConversation = ref(false)
   const inferenceStatus = ref(null)
 
   async function fetchConversations() {
@@ -93,10 +94,31 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function createConversation() {
-    const conv = await chatApi.createConversation({ title: '新对话' })
-    conversations.value.unshift(conv)
-    await selectConversation(conv.id)
-    return conv
+    if (creatingConversation.value) {
+      return currentConversation.value
+    }
+
+    // 已在空白会话中，重复点击不再新建
+    if (currentConversation.value && messages.value.length === 0) {
+      return currentConversation.value
+    }
+
+    // 已存在空会话时直接切换，避免重复空会话
+    const existingEmpty = conversations.value.find(conv => (conv?.title || '') === '新对话')
+    if (existingEmpty) {
+      await selectConversation(existingEmpty.id)
+      return existingEmpty
+    }
+
+    creatingConversation.value = true
+    try {
+      const conv = await chatApi.createConversation({ title: '新对话' })
+      conversations.value.unshift(conv)
+      await selectConversation(conv.id)
+      return conv
+    } finally {
+      creatingConversation.value = false
+    }
   }
 
   async function deleteConversation(id) {
@@ -175,6 +197,7 @@ export const useChatStore = defineStore('chat', () => {
     currentConversation,
     messages,
     loading,
+    creatingConversation,
     inferenceStatus,
     fetchConversations,
     createConversation,
