@@ -7,7 +7,7 @@ from ..models.user import User
 from ..models.conversation import Conversation
 from ..models.message import Message
 from ..schemas.conversation import ConversationCreate, ConversationResponse
-from ..schemas.message import MessageCreate, MessageResponse, MessageWithTraceResponse
+from ..schemas.message import InferenceModelSwitchRequest, MessageCreate, MessageResponse, MessageWithTraceResponse
 from ..utils.security import get_current_chat_user
 from ..services.inference_service import inference_service
 
@@ -17,6 +17,28 @@ router = APIRouter()
 def get_inference_status(current_user: User = Depends(get_current_chat_user)):
     """查看推理链路状态（调试用）"""
     return inference_service.debug_status()
+
+
+@router.get("/inference/models")
+def get_inference_models(current_user: User = Depends(get_current_chat_user)):
+    """获取当前可切换模型列表"""
+    inference_service.refresh_models()
+    return {
+        "current_model_id": inference_service.current_model_id,
+        "models": inference_service.list_models(),
+    }
+
+
+@router.post("/inference/models/select")
+def select_inference_model(
+    data: InferenceModelSwitchRequest,
+    current_user: User = Depends(get_current_chat_user),
+):
+    """切换当前推理模型。切换时会先停止旧模型，再启动新模型。"""
+    try:
+        return inference_service.switch_model(data.model_id, start=bool(data.eager_start))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/inference/trace")
@@ -122,8 +144,11 @@ def send_message(
     
     # 调用推理引擎
     infer_start = time.monotonic()
+    selected_model_id = str(data.model_id or "").strip() or None
     try:
-        ai_response = inference_service.generate(data.content, history)
+        ai_response = inference_service.generate(data.content, history, model_id=selected_model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         ai_response = f"推理异常: {exc}"
     infer_elapsed = time.monotonic() - infer_start

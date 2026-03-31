@@ -4,6 +4,12 @@ from typing import Any, Dict, Optional
 
 class MessageCreate(BaseModel):
     content: str
+    model_id: Optional[str] = None
+
+
+class InferenceModelSwitchRequest(BaseModel):
+    model_id: str
+    eager_start: bool = True
 
 class MessageResponse(BaseModel):
     id: int

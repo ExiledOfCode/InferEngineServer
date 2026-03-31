@@ -90,6 +90,9 @@ export const useChatStore = defineStore('chat', () => {
   const creatingConversation = ref(false)
   const inferenceStatus = ref(null)
   const inferenceTrace = ref(null)
+  const availableModels = ref([])
+  const selectedModelId = ref('')
+  const switchingModel = ref(false)
 
   async function fetchConversations() {
     conversations.value = await chatApi.getConversations()
@@ -141,12 +144,62 @@ export const useChatStore = defineStore('chat', () => {
 
   async function fetchInferenceStatus() {
     inferenceStatus.value = await chatApi.getInferenceStatus()
+    if (inferenceStatus.value?.current_model_id) {
+      selectedModelId.value = inferenceStatus.value.current_model_id
+    }
     return inferenceStatus.value
   }
 
   async function fetchInferenceTrace() {
     inferenceTrace.value = await chatApi.getInferenceTrace()
     return inferenceTrace.value
+  }
+
+  async function fetchInferenceModels() {
+    const payload = await chatApi.getInferenceModels()
+    availableModels.value = Array.isArray(payload?.models) ? payload.models : []
+    if (payload?.current_model_id) {
+      selectedModelId.value = payload.current_model_id
+    } else {
+      const current = availableModels.value.find(item => item?.current)
+      if (current?.id) {
+        selectedModelId.value = current.id
+      }
+    }
+    return availableModels.value
+  }
+
+  async function switchModel(modelId) {
+    const nextModelId = String(modelId || '').trim()
+    if (!nextModelId) {
+      return inferenceStatus.value
+    }
+    if (switchingModel.value) {
+      return inferenceStatus.value
+    }
+
+    const previousModelId = selectedModelId.value
+    switchingModel.value = true
+    try {
+      const status = await chatApi.selectInferenceModel(nextModelId, true)
+      inferenceStatus.value = status
+      if (status?.current_model_id) {
+        selectedModelId.value = status.current_model_id
+      } else {
+        selectedModelId.value = nextModelId
+      }
+      try {
+        await fetchInferenceModels()
+      } catch {
+        // ignore model list refresh failure
+      }
+      return inferenceStatus.value
+    } catch (err) {
+      selectedModelId.value = previousModelId
+      throw err
+    } finally {
+      switchingModel.value = false
+    }
   }
 
   async function sendMessage(content) {
@@ -176,7 +229,9 @@ export const useChatStore = defineStore('chat', () => {
     traceTimer = window.setInterval(pollTrace, 700)
 
     try {
-      const response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content))
+      const response = normalizeAssistantMessage(
+        await chatApi.sendMessage(convId, content, selectedModelId.value || null)
+      )
       if (response?.inference_trace) {
         inferenceTrace.value = response.inference_trace
       }
@@ -232,12 +287,17 @@ export const useChatStore = defineStore('chat', () => {
     creatingConversation,
     inferenceStatus,
     inferenceTrace,
+    availableModels,
+    selectedModelId,
+    switchingModel,
     fetchConversations,
     createConversation,
     deleteConversation,
     selectConversation,
     fetchInferenceStatus,
     fetchInferenceTrace,
+    fetchInferenceModels,
+    switchModel,
     sendMessage
   }
 })

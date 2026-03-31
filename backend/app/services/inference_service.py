@@ -1,6 +1,6 @@
+import json
 import os
 import queue
-import json
 import subprocess
 import threading
 import time
@@ -11,7 +11,7 @@ from ..config import settings
 
 
 class InferenceService:
-    """基于 main_qwen.cpp 的推理服务（常驻进程，每次请求触发一次 generate）。"""
+    """基于 KuiperLLama demo 可执行文件的推理服务。"""
 
     def __init__(self):
         self.engine_path = settings.INFERENCE_ENGINE_PATH
@@ -20,10 +20,16 @@ class InferenceService:
         self.tokenizer_path: Optional[str] = None
         self.tokenizer_type: Optional[str] = None
         self.model_selection_source: str = "auto"
+        self.current_model_id: Optional[str] = None
+        self.current_model_name: Optional[str] = None
+        self.current_model_family: Optional[str] = None
+        self.available_models: List[Dict[str, Any]] = []
+        self.last_engine_error: Optional[str] = None
+
         self.process: Optional[subprocess.Popen] = None
         self.stdout_queue: Optional[queue.Queue] = None
         self.stdout_reader: Optional[threading.Thread] = None
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.counter_lock = threading.Lock()
         self.trace_lock = threading.Lock()
         self.request_counter = 0
@@ -47,8 +53,8 @@ class InferenceService:
         if self.max_new_tokens < 8:
             print(f"[WARN] INFERENCE_MAX_NEW_TOKENS={self.max_new_tokens} 偏小，可能导致回复很短。")
 
-        self._detect_model()
-        if self.eager_start:
+        self._detect_models()
+        if self.eager_start and self.is_ready():
             self._start_engine()
         else:
             print("[Inference] 已启用延迟启动：首次 generate 时再启动推理进程。")
@@ -91,11 +97,11 @@ class InferenceService:
         if self.prompt_format in {"raw", "chatml"}:
             return self.prompt_format
 
-        # auto: 对 instruct/chat 模型优先走 chatml，其余模型保持 raw
         model_hint = " ".join(
             [
                 os.path.basename(self.model_path or ""),
                 os.path.basename(os.path.dirname(self.model_path or "")),
+                str(self.current_model_family or ""),
             ]
         ).lower()
         if any(key in model_hint for key in ("instruct", "chat", "qwen")):
@@ -136,6 +142,9 @@ class InferenceService:
             "history_size": int(history_size),
             "prompt_format": prompt_format,
             "prompt_preview": self._truncate_text(prompt, 280),
+            "model_id": self.current_model_id,
+            "model_name": self.current_model_name,
+            "model_family": self.current_model_family,
             "steps": [],
         }
         with self.trace_lock:
@@ -354,122 +363,325 @@ class InferenceService:
             )
         return trace
 
-    def _detect_model(self):
-        build_demo_path = os.path.join(self.engine_path, "build", "demo")
-        models_root = os.path.join(self.engine_path, "models")
+    @staticmethod
+    def _tokenizer_type_from_path(path: Optional[str]) -> Optional[str]:
+        if not path:
+            return None
+        lower_path = path.lower()
+        if lower_path.endswith(".json"):
+            return "bpe"
+        if lower_path.endswith(".model"):
+            return "spe"
+        return None
+
+    def _resolve_existing_path(self, raw_path: str, expect: str, models_root: str) -> Optional[str]:
+        value = str(raw_path or "").strip()
+        if not value:
+            return None
+
+        candidates: List[str] = []
+        if os.path.isabs(value):
+            candidates.append(value)
+        else:
+            candidates.extend(
+                [
+                    os.path.join(models_root, value),
+                    os.path.join(self.engine_path, value),
+                    value,
+                ]
+            )
+
+        visited = set()
+        for candidate in candidates:
+            abs_path = os.path.abspath(candidate)
+            if abs_path in visited:
+                continue
+            visited.add(abs_path)
+            if not os.path.exists(abs_path):
+                continue
+            if expect == "file" and not os.path.isfile(abs_path):
+                continue
+            if expect == "dir" and not os.path.isdir(abs_path):
+                continue
+            return abs_path
+        return None
+
+    @staticmethod
+    def _find_model_and_tokenizer_in_dir(dir_path: str):
         model_exts = (".bin", ".gguf", ".safetensors")
+        model_file = None
+        tokenizer_file = None
+        tokenizer_type = None
 
-        def clear_selected_model():
-            self.model_path = None
-            self.tokenizer_path = None
-            self.executable = None
-            self.tokenizer_type = None
-            self.model_selection_source = "none"
+        try:
+            files = os.listdir(dir_path)
+        except Exception:
+            return None, None, None
 
-        def tokenizer_type_from_path(path: Optional[str]) -> Optional[str]:
-            if not path:
-                return None
-            lower_path = path.lower()
-            if lower_path.endswith(".json"):
-                return "bpe"
-            if lower_path.endswith(".model"):
-                return "spe"
-            return None
+        for name in files:
+            full_path = os.path.join(dir_path, name)
+            if not os.path.isfile(full_path):
+                continue
+            if name == "tokenizer.json" or (name.endswith(".json") and "tokenizer" in name.lower()):
+                tokenizer_file = full_path
+                tokenizer_type = "bpe"
+                break
 
-        def resolve_existing_path(raw_path: str, expect: str) -> Optional[str]:
-            value = str(raw_path or "").strip()
-            if not value:
-                return None
-
-            candidates: List[str] = []
-            if os.path.isabs(value):
-                candidates.append(value)
-            else:
-                candidates.extend(
-                    [
-                        os.path.join(models_root, value),
-                        os.path.join(self.engine_path, value),
-                        value,
-                    ]
-                )
-
-            visited = set()
-            for candidate in candidates:
-                abs_path = os.path.abspath(candidate)
-                if abs_path in visited:
-                    continue
-                visited.add(abs_path)
-                if not os.path.exists(abs_path):
-                    continue
-                if expect == "file" and not os.path.isfile(abs_path):
-                    continue
-                if expect == "dir" and not os.path.isdir(abs_path):
-                    continue
-                return abs_path
-            return None
-
-        def find_model_and_tokenizer_in_dir(dir_path: str):
-            model_file = None
-            tokenizer_file = None
-            tokenizer_type = None
-
-            try:
-                files = os.listdir(dir_path)
-            except Exception:
-                return None, None, None
-
+        if tokenizer_file is None:
             for name in files:
                 full_path = os.path.join(dir_path, name)
                 if not os.path.isfile(full_path):
                     continue
-                if name == "tokenizer.json" or (name.endswith(".json") and "tokenizer" in name.lower()):
+                if name.endswith(".model"):
                     tokenizer_file = full_path
-                    tokenizer_type = "bpe"
+                    tokenizer_type = "spe"
                     break
 
-            if tokenizer_file is None:
-                for name in files:
-                    full_path = os.path.join(dir_path, name)
-                    if not os.path.isfile(full_path):
-                        continue
-                    if name.endswith(".model"):
-                        tokenizer_file = full_path
-                        tokenizer_type = "spe"
-                        break
+        model_candidates = []
+        for name in files:
+            full_path = os.path.join(dir_path, name)
+            if not os.path.isfile(full_path):
+                continue
+            lower_name = name.lower()
+            if "tokenizer" in lower_name or not lower_name.endswith(model_exts):
+                continue
+            if lower_name.endswith(".bin"):
+                priority = 0
+            elif lower_name.endswith(".gguf"):
+                priority = 1
+            else:
+                priority = 2
+            model_candidates.append((priority, full_path))
 
-            model_candidates = []
-            for name in files:
-                full_path = os.path.join(dir_path, name)
-                if not os.path.isfile(full_path):
-                    continue
-                lower_name = name.lower()
-                if "tokenizer" in lower_name or not lower_name.endswith(model_exts):
-                    continue
-                if lower_name.endswith(".bin"):
-                    priority = 0
-                elif lower_name.endswith(".gguf"):
-                    priority = 1
-                else:
-                    priority = 2
-                model_candidates.append((priority, full_path))
+        if model_candidates:
+            model_candidates.sort(key=lambda item: item[0])
+            model_file = model_candidates[0][1]
 
-            if model_candidates:
-                model_candidates.sort(key=lambda item: item[0])
-                model_file = model_candidates[0][1]
+        return model_file, tokenizer_file, tokenizer_type
 
-            return model_file, tokenizer_file, tokenizer_type
+    def _model_id_from_path(self, path: Optional[str]) -> Optional[str]:
+        if not path:
+            return None
+        abs_path = os.path.abspath(path)
+        try:
+            rel_path = os.path.relpath(abs_path, self.engine_path)
+            if not rel_path.startswith(".."):
+                return rel_path.replace(os.sep, "/")
+        except Exception:
+            pass
+        return abs_path
+
+    @staticmethod
+    def _infer_model_family(model_path: str, dir_path: str) -> str:
+        hint = " ".join([os.path.basename(model_path), os.path.basename(dir_path)]).lower()
+        if "qwen3" in hint:
+            return "qwen3"
+        if "qwen2.5" in hint or "qwen2" in hint or "qwen" in hint:
+            return "qwen2"
+        if "llama3" in hint:
+            return "llama3"
+        if "llama" in hint:
+            return "llama"
+        return "unknown"
+
+    @staticmethod
+    def _model_display_name(dir_path: str, model_path: str) -> str:
+        dir_name = os.path.basename(dir_path.rstrip(os.sep))
+        return dir_name or os.path.basename(model_path)
+
+    def _resolve_executable_for_family(self, family: str) -> Optional[str]:
+        build_demo_path = os.path.join(self.engine_path, "build", "demo")
+        executable_map = {
+            "qwen2": "qwen_infer",
+            "qwen3": "qwen3_infer",
+        }
+        executable_name = executable_map.get(family)
+        if not executable_name:
+            return None
+        executable = os.path.join(build_demo_path, executable_name)
+        return executable if os.path.exists(executable) else None
+
+    def _build_model_candidate(
+        self,
+        source: str,
+        dir_path: str,
+        model_path: str,
+        tokenizer_path: str,
+        tokenizer_type: Optional[str],
+        configured_id: Optional[str] = None,
+        configured_name: Optional[str] = None,
+        configured_family: Optional[str] = None,
+        configured_executable: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        family = str(configured_family or self._infer_model_family(model_path, dir_path)).strip().lower()
+        executable = configured_executable or self._resolve_executable_for_family(family)
+        supported = bool(tokenizer_type == "bpe" and executable)
+        unsupported_reason = None
+        if tokenizer_type != "bpe":
+            unsupported_reason = "当前前后端仅支持 tokenizer.json(BPE) 的服务模式"
+        elif not executable:
+            unsupported_reason = f"未找到 {family} 对应推理可执行文件"
+
+        return {
+            "id": str(configured_id or self._model_id_from_path(model_path)).strip(),
+            "name": str(configured_name or self._model_display_name(dir_path, model_path)).strip(),
+            "family": family,
+            "source": source,
+            "dir": dir_path,
+            "model": model_path,
+            "tokenizer": tokenizer_path,
+            "tokenizer_type": tokenizer_type or "unknown",
+            "executable": executable,
+            "executable_name": os.path.basename(executable) if executable else None,
+            "supported": supported,
+            "unsupported_reason": unsupported_reason,
+        }
+
+    def _build_candidate_from_spec(self, spec: Dict[str, Any], models_root: str) -> Optional[Dict[str, Any]]:
+        model_dir_raw = str(spec.get("dir") or spec.get("model_dir") or "").strip()
+        model_path_raw = str(spec.get("model_path") or "").strip()
+        tokenizer_path_raw = str(spec.get("tokenizer_path") or "").strip()
+        configured_id = str(spec.get("id") or "").strip() or None
+        configured_name = str(spec.get("name") or "").strip() or None
+        configured_family = str(spec.get("family") or "").strip() or None
+        configured_executable_raw = str(spec.get("executable_path") or spec.get("executable") or "").strip()
+
+        resolved_dir = self._resolve_existing_path(model_dir_raw, "dir", models_root) if model_dir_raw else None
+        resolved_model = self._resolve_existing_path(model_path_raw, "file", models_root) if model_path_raw else None
+        resolved_tokenizer = self._resolve_existing_path(tokenizer_path_raw, "file", models_root) if tokenizer_path_raw else None
+        resolved_executable = (
+            self._resolve_existing_path(configured_executable_raw, "file", models_root)
+            if configured_executable_raw
+            else None
+        )
+
+        detected_model = None
+        detected_tokenizer = None
+        detected_tokenizer_type = None
+        if resolved_dir:
+            detected_model, detected_tokenizer, detected_tokenizer_type = self._find_model_and_tokenizer_in_dir(resolved_dir)
+
+        model_path = resolved_model or detected_model
+        tokenizer_path = resolved_tokenizer or detected_tokenizer
+        tokenizer_type = self._tokenizer_type_from_path(tokenizer_path) or detected_tokenizer_type
+
+        if not model_path or not tokenizer_path:
+            print(
+                f"[WARN] 跳过模型配置 {configured_name or configured_id or model_dir_raw or model_path_raw}: "
+                "模型文件或 tokenizer 缺失"
+            )
+            return None
+
+        if not resolved_dir:
+            resolved_dir = os.path.dirname(model_path)
+
+        return self._build_model_candidate(
+            source="catalog",
+            dir_path=resolved_dir,
+            model_path=model_path,
+            tokenizer_path=tokenizer_path,
+            tokenizer_type=tokenizer_type,
+            configured_id=configured_id,
+            configured_name=configured_name,
+            configured_family=configured_family,
+            configured_executable=resolved_executable,
+        )
+
+    @staticmethod
+    def _candidate_priority(candidate: Dict[str, Any]) -> int:
+        score = 0
+        if candidate.get("source") in {"config", "catalog"}:
+            score += 1000
+        if candidate.get("supported"):
+            score += 200
+        family = candidate.get("family")
+        if family == "qwen3":
+            score += 60
+        elif family == "qwen2":
+            score += 50
+        elif family == "llama3":
+            score += 20
+        if candidate.get("tokenizer_type") == "bpe":
+            score += 30
+        model_name = os.path.basename(str(candidate.get("model") or "")).lower()
+        if model_name.endswith(".bin"):
+            score += 20
+        elif model_name.endswith(".safetensors"):
+            score -= 10
+        return score
+
+    def _serialize_model(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+        current = candidate.get("id") == self.current_model_id
+        return {
+            "id": candidate.get("id"),
+            "name": candidate.get("name"),
+            "family": candidate.get("family"),
+            "source": candidate.get("source"),
+            "supported": bool(candidate.get("supported")),
+            "unsupported_reason": candidate.get("unsupported_reason"),
+            "tokenizer_type": candidate.get("tokenizer_type"),
+            "executable_name": candidate.get("executable_name"),
+            "model_path": candidate.get("model"),
+            "tokenizer_path": candidate.get("tokenizer"),
+            "current": current,
+            "running": current and self.is_running(),
+        }
+
+    def _clear_selected_model(self):
+        self.executable = None
+        self.model_path = None
+        self.tokenizer_path = None
+        self.tokenizer_type = None
+        self.model_selection_source = "none"
+        self.current_model_id = None
+        self.current_model_name = None
+        self.current_model_family = None
+
+    def _apply_selected_candidate(self, candidate: Dict[str, Any]):
+        self.current_model_id = candidate.get("id")
+        self.current_model_name = candidate.get("name")
+        self.current_model_family = candidate.get("family")
+        self.model_selection_source = candidate.get("source", "auto")
+        self.model_path = candidate.get("model")
+        self.tokenizer_path = candidate.get("tokenizer")
+        self.tokenizer_type = candidate.get("tokenizer_type")
+        self.executable = candidate.get("executable")
+        self.last_engine_error = candidate.get("unsupported_reason")
+
+    def _detect_models(self):
+        build_demo_path = os.path.join(self.engine_path, "build", "demo")
+        models_root = os.path.join(self.engine_path, "models")
 
         print("=" * 50)
         print("扫描模型文件...")
-        candidates: List[Dict[str, str]] = []
+        print(f"  engine_path: {self.engine_path}")
+        print(f"  demo_path: {build_demo_path}")
+
+        candidates: List[Dict[str, Any]] = []
+        configured_candidate_id: Optional[str] = None
+        configured_catalog = list(getattr(settings, "INFERENCE_MODEL_SPECS", []) or [])
+
+        if configured_catalog:
+            print(f"  检测到模型目录配置，共 {len(configured_catalog)} 项。")
+            for spec in configured_catalog:
+                candidate = self._build_candidate_from_spec(spec, models_root)
+                if not candidate:
+                    continue
+                candidates.append(candidate)
+                if configured_candidate_id is None:
+                    configured_candidate_id = candidate.get("id")
+                print(
+                    f"    catalog: {candidate.get('name')} [{candidate.get('family')}] "
+                    f"model={candidate.get('model')}"
+                )
 
         configured_model_dir = str(getattr(settings, "INFERENCE_MODEL_DIR", "") or "").strip()
         configured_model_path = str(getattr(settings, "INFERENCE_MODEL_PATH", "") or "").strip()
         configured_tokenizer_path = str(getattr(settings, "INFERENCE_TOKENIZER_PATH", "") or "").strip()
-        has_explicit_config = any([configured_model_dir, configured_model_path, configured_tokenizer_path])
+        has_explicit_config = any([configured_model_dir, configured_model_path, configured_tokenizer_path]) and not configured_catalog
 
         if has_explicit_config:
-            print("  检测到显式模型配置，优先使用 config.py 指定值。")
+            print("  检测到显式模型配置，优先将其作为默认模型。")
             print(f"    INFERENCE_MODEL_DIR: {configured_model_dir or '(empty)'}")
             print(f"    INFERENCE_MODEL_PATH: {configured_model_path or '(empty)'}")
             print(f"    INFERENCE_TOKENIZER_PATH: {configured_tokenizer_path or '(empty)'}")
@@ -477,191 +689,215 @@ class InferenceService:
             explicit_dir = None
             explicit_model = None
             explicit_tokenizer = None
+            explicit_tokenizer_type = None
+            config_valid = True
 
             if configured_model_dir:
-                explicit_dir = resolve_existing_path(configured_model_dir, "dir")
+                explicit_dir = self._resolve_existing_path(configured_model_dir, "dir", models_root)
                 if not explicit_dir:
-                    print(f"✗ INFERENCE_MODEL_DIR 无效: {configured_model_dir}")
-                    clear_selected_model()
-                    return
+                    config_valid = False
+                    print(f"[WARN] INFERENCE_MODEL_DIR 无效，已回退为自动扫描: {configured_model_dir}")
 
-            if configured_model_path:
-                explicit_model = resolve_existing_path(configured_model_path, "file")
+            if config_valid and configured_model_path:
+                explicit_model = self._resolve_existing_path(configured_model_path, "file", models_root)
                 if not explicit_model:
-                    print(f"✗ INFERENCE_MODEL_PATH 无效: {configured_model_path}")
-                    clear_selected_model()
-                    return
-                lower_model_name = os.path.basename(explicit_model).lower()
-                if not lower_model_name.endswith(model_exts):
-                    print(f"✗ INFERENCE_MODEL_PATH 不是支持的模型文件: {explicit_model}")
-                    print(f"  支持扩展名: {', '.join(model_exts)}")
-                    clear_selected_model()
-                    return
+                    config_valid = False
+                    print(f"[WARN] INFERENCE_MODEL_PATH 无效，已回退为自动扫描: {configured_model_path}")
 
-            if configured_tokenizer_path:
-                explicit_tokenizer = resolve_existing_path(configured_tokenizer_path, "file")
+            if config_valid and configured_tokenizer_path:
+                explicit_tokenizer = self._resolve_existing_path(configured_tokenizer_path, "file", models_root)
                 if not explicit_tokenizer:
-                    print(f"✗ INFERENCE_TOKENIZER_PATH 无效: {configured_tokenizer_path}")
-                    clear_selected_model()
-                    return
+                    config_valid = False
+                    print(f"[WARN] INFERENCE_TOKENIZER_PATH 无效，已回退为自动扫描: {configured_tokenizer_path}")
 
-            selected_dir = explicit_dir
+            if config_valid:
+                selected_dir = explicit_dir
 
-            if not explicit_model:
-                infer_dir = explicit_dir
-                if not infer_dir and explicit_tokenizer:
-                    infer_dir = os.path.dirname(explicit_tokenizer)
-                if not infer_dir:
-                    print("✗ 请至少配置 INFERENCE_MODEL_DIR 或 INFERENCE_MODEL_PATH")
-                    clear_selected_model()
-                    return
-                explicit_model, detected_tokenizer, detected_tokenizer_type = find_model_and_tokenizer_in_dir(
-                    infer_dir
-                )
                 if not explicit_model:
-                    print(f"✗ 指定目录内未找到模型文件: {infer_dir}")
-                    clear_selected_model()
-                    return
-                selected_dir = infer_dir
-                if not explicit_tokenizer:
-                    explicit_tokenizer = detected_tokenizer
-                    explicit_tokenizer_type = detected_tokenizer_type
-                else:
-                    explicit_tokenizer_type = tokenizer_type_from_path(explicit_tokenizer)
-            else:
-                explicit_tokenizer_type = tokenizer_type_from_path(explicit_tokenizer)
+                    infer_dir = explicit_dir
+                    if not infer_dir and explicit_tokenizer:
+                        infer_dir = os.path.dirname(explicit_tokenizer)
+                    if infer_dir:
+                        explicit_model, detected_tokenizer, detected_tokenizer_type = self._find_model_and_tokenizer_in_dir(
+                            infer_dir
+                        )
+                        if explicit_model:
+                            selected_dir = infer_dir
+                            if not explicit_tokenizer:
+                                explicit_tokenizer = detected_tokenizer
+                                explicit_tokenizer_type = detected_tokenizer_type
+                    if not explicit_model:
+                        config_valid = False
+                        print("[WARN] 显式配置未能定位到完整模型，将继续自动扫描。")
 
-            if not explicit_tokenizer:
-                tokenizer_search_dirs = []
-                if explicit_dir:
-                    tokenizer_search_dirs.append(explicit_dir)
-                tokenizer_search_dirs.append(os.path.dirname(explicit_model))
+                if config_valid and not explicit_tokenizer and explicit_model:
+                    tokenizer_search_dirs = []
+                    if explicit_dir:
+                        tokenizer_search_dirs.append(explicit_dir)
+                    tokenizer_search_dirs.append(os.path.dirname(explicit_model))
 
-                for search_dir in tokenizer_search_dirs:
-                    _, detected_tokenizer, detected_tokenizer_type = find_model_and_tokenizer_in_dir(search_dir)
-                    if detected_tokenizer:
-                        explicit_tokenizer = detected_tokenizer
-                        explicit_tokenizer_type = detected_tokenizer_type
-                        if not selected_dir:
-                            selected_dir = search_dir
-                        break
+                    for search_dir in tokenizer_search_dirs:
+                        _, detected_tokenizer, detected_tokenizer_type = self._find_model_and_tokenizer_in_dir(search_dir)
+                        if detected_tokenizer:
+                            explicit_tokenizer = detected_tokenizer
+                            explicit_tokenizer_type = detected_tokenizer_type
+                            if not selected_dir:
+                                selected_dir = search_dir
+                            break
 
-            if not explicit_tokenizer:
-                print("✗ 无法确定 tokenizer，请配置 INFERENCE_TOKENIZER_PATH")
-                clear_selected_model()
-                return
+                if config_valid and explicit_tokenizer and not explicit_tokenizer_type:
+                    explicit_tokenizer_type = self._tokenizer_type_from_path(explicit_tokenizer)
 
-            if not explicit_tokenizer_type:
-                explicit_tokenizer_type = tokenizer_type_from_path(explicit_tokenizer)
+                if config_valid and explicit_model and explicit_tokenizer:
+                    if not selected_dir:
+                        selected_dir = os.path.dirname(explicit_model)
+                    candidate = self._build_model_candidate(
+                        source="config",
+                        dir_path=selected_dir,
+                        model_path=explicit_model,
+                        tokenizer_path=explicit_tokenizer,
+                        tokenizer_type=explicit_tokenizer_type,
+                    )
+                    configured_candidate_id = candidate.get("id")
+                    candidates.append(candidate)
+                    print("  已根据显式配置定位模型:")
+                    print(f"    目录: {selected_dir}")
+                    print(f"    模型: {explicit_model}")
+                    print(f"    分词器: {explicit_tokenizer} ({explicit_tokenizer_type or 'unknown'})")
 
-            if not selected_dir:
-                selected_dir = os.path.dirname(explicit_model)
-
-            candidates.append(
-                {
-                    "source": "config",
-                    "dir": selected_dir,
-                    "model": explicit_model,
-                    "tokenizer": explicit_tokenizer,
-                    "tokenizer_type": explicit_tokenizer_type or "unknown",
-                }
-            )
-            print("  已根据显式配置定位模型:")
-            print(f"    目录: {selected_dir}")
-            print(f"    模型: {explicit_model}")
-            print(f"    分词器: {explicit_tokenizer} ({explicit_tokenizer_type or 'unknown'})")
-
-        if not has_explicit_config:
+        visited_dirs = set()
+        if not configured_catalog:
             if os.path.exists(models_root):
                 for root, _, _ in os.walk(models_root):
-                    model_file, tokenizer_file, tokenizer_type = find_model_and_tokenizer_in_dir(root)
+                    abs_root = os.path.abspath(root)
+                    if abs_root in visited_dirs:
+                        continue
+                    visited_dirs.add(abs_root)
+                    model_file, tokenizer_file, tokenizer_type = self._find_model_and_tokenizer_in_dir(abs_root)
                     if model_file and tokenizer_file:
                         candidates.append(
-                            {
-                                "source": "auto",
-                                "dir": root,
-                                "model": model_file,
-                                "tokenizer": tokenizer_file,
-                                "tokenizer_type": tokenizer_type,
-                            }
+                            self._build_model_candidate(
+                                source="auto",
+                                dir_path=abs_root,
+                                model_path=model_file,
+                                tokenizer_path=tokenizer_file,
+                                tokenizer_type=tokenizer_type,
+                            )
                         )
-                        print(f"  找到候选目录: {root}")
-                        print(f"    模型: {model_file}")
-                        print(f"    分词器: {tokenizer_file} ({tokenizer_type})")
 
-            if not candidates:
-                model_file, tokenizer_file, tokenizer_type = find_model_and_tokenizer_in_dir(self.engine_path)
+            engine_root = os.path.abspath(self.engine_path)
+            if engine_root not in visited_dirs:
+                model_file, tokenizer_file, tokenizer_type = self._find_model_and_tokenizer_in_dir(engine_root)
                 if model_file and tokenizer_file:
                     candidates.append(
-                        {
-                            "source": "auto",
-                            "dir": self.engine_path,
-                            "model": model_file,
-                            "tokenizer": tokenizer_file,
-                            "tokenizer_type": tokenizer_type,
-                        }
+                        self._build_model_candidate(
+                            source="auto",
+                            dir_path=engine_root,
+                            model_path=model_file,
+                            tokenizer_path=tokenizer_file,
+                            tokenizer_type=tokenizer_type,
+                        )
                     )
-                    print(f"  找到候选目录: {self.engine_path}")
-                    print(f"    模型: {model_file}")
-                    print(f"    分词器: {tokenizer_file} ({tokenizer_type})")
 
         if not candidates:
-            print("✗ 未找到可用的模型和分词器")
-            clear_selected_model()
+            print("✗ 未找到可用模型目录")
+            self.available_models = []
+            self._clear_selected_model()
+            self.last_engine_error = "未找到可用的模型和分词器"
             return
 
-        def candidate_score(candidate: Dict) -> int:
-            if candidate.get("source") == "config":
-                return 10**9
-            dir_name = os.path.basename(candidate["dir"]).lower()
-            score = 0
-            if "qwen" in dir_name:
-                score += 100
-            if candidate["tokenizer_type"] == "bpe":
-                score += 50
-            if "llama" in dir_name:
-                score += 20
-            model_name = os.path.basename(candidate["model"]).lower()
-            if model_name.endswith(".bin"):
-                score += 30
-            elif model_name.endswith(".safetensors"):
-                score -= 10
-            return score
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for candidate in candidates:
+            candidate_id = str(candidate.get("id") or "")
+            if not candidate_id:
+                continue
+            current = deduped.get(candidate_id)
+            if current is None or self._candidate_priority(candidate) > self._candidate_priority(current):
+                deduped[candidate_id] = candidate
 
-        candidates.sort(key=candidate_score, reverse=True)
-        selected = candidates[0]
+        ordered_candidates = sorted(deduped.values(), key=self._candidate_priority, reverse=True)
+        self.available_models = ordered_candidates
 
-        self.model_path = selected["model"]
-        self.tokenizer_path = selected["tokenizer"]
-        self.tokenizer_type = selected["tokenizer_type"]
-        self.model_selection_source = selected.get("source", "auto")
+        print(f"  共发现 {len(ordered_candidates)} 个模型候选:")
+        for item in ordered_candidates:
+            support_text = "supported" if item.get("supported") else f"unsupported: {item.get('unsupported_reason')}"
+            print(
+                f"    - {item.get('name')} [{item.get('family')}] "
+                f"{os.path.basename(str(item.get('model') or ''))} ({support_text})"
+            )
 
+        selected = None
+        if self.current_model_id:
+            selected = next((item for item in ordered_candidates if item.get("id") == self.current_model_id), None)
+        if not selected and configured_candidate_id:
+            selected = next((item for item in ordered_candidates if item.get("id") == configured_candidate_id), None)
+        if not selected:
+            selected = next((item for item in ordered_candidates if item.get("supported")), None)
+        if not selected:
+            selected = ordered_candidates[0]
+
+        self._apply_selected_candidate(selected)
         print("=" * 50)
-        print("已选择模型目录:")
-        print(f"  来源: {'显式配置' if self.model_selection_source == 'config' else '自动扫描'}")
-        print(f"  目录: {selected['dir']}")
+        print("已选择当前模型:")
+        source_label = {
+            "catalog": "模型目录配置",
+            "config": "显式配置",
+            "auto": "自动扫描",
+        }.get(self.model_selection_source, self.model_selection_source)
+        print(f"  来源: {source_label}")
+        print(f"  名称: {self.current_model_name}")
+        print(f"  家族: {self.current_model_family}")
         print(f"  模型: {self.model_path}")
         print(f"  分词器: {self.tokenizer_path}")
-        print(f"  类型: {self.tokenizer_type}")
+        print(f"  可执行文件: {self.executable or '未找到'}")
+        if self.last_engine_error:
+            print(f"  限制: {self.last_engine_error}")
 
-        qwen_single_shot = os.path.join(build_demo_path, "qwen_infer")
-        if self.tokenizer_type != "bpe":
-            print("✗ 当前仅支持 BPE/Qwen tokenizer 的 main_qwen 推理模式")
-            print("  请使用 Qwen 模型 + tokenizer.json")
-            self.executable = None
-            return
-        if not os.path.exists(qwen_single_shot):
-            print("✗ 未找到 qwen_infer 可执行文件")
-            print(f"  期望路径: {qwen_single_shot}")
-            print("  请先编译: cmake --build build --target qwen_infer -j$(nproc)")
-            self.executable = None
-            return
+    def _find_candidate_by_id(self, model_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        target = str(model_id or "").strip()
+        if not target:
+            return None
+        for candidate in self.available_models:
+            if candidate.get("id") == target:
+                return candidate
+        return None
 
-        self.executable = qwen_single_shot
-        print("✓ 使用推理引擎: qwen_infer (main_qwen)")
+    def refresh_models(self):
+        with self.lock:
+            self._detect_models()
+
+    def list_models(self) -> List[Dict[str, Any]]:
+        with self.lock:
+            return [self._serialize_model(candidate) for candidate in self.available_models]
+
+    def switch_model(self, model_id: str, start: bool = True) -> Dict[str, object]:
+        with self.lock:
+            candidate = self._find_candidate_by_id(model_id)
+            if not candidate:
+                raise ValueError(f"未找到模型: {model_id}")
+            if not candidate.get("supported"):
+                raise ValueError(candidate.get("unsupported_reason") or "该模型当前无法用于服务模式")
+
+            same_model = candidate.get("id") == self.current_model_id
+            if same_model and self.is_running():
+                return self.debug_status()
+
+            if self.is_running():
+                print(f"[Inference] 切换模型前先停止当前进程: {self.current_model_name}")
+                self._stop_process()
+
+            self._apply_selected_candidate(candidate)
+            print(f"[Inference] 已切换当前模型 -> {self.current_model_name} ({self.current_model_family})")
+
+            if start:
+                self._start_engine()
+
+            return self.debug_status()
 
     def _start_engine(self):
+        self.last_engine_error = None
         if not self.is_ready():
+            self.last_engine_error = "推理引擎配置不完整"
             print("✗ 推理引擎配置不完整:")
             print(f"  可执行文件: {self.executable or '未找到'}")
             print(f"  模型文件: {self.model_path or '未找到'}")
@@ -692,7 +928,8 @@ class InferenceService:
                 },
             )
         except Exception as exc:
-            print(f"✗ 推理进程启动失败: {exc}")
+            self.last_engine_error = f"推理进程启动失败: {exc}"
+            print(f"✗ {self.last_engine_error}")
             self.process = None
             return
 
@@ -700,18 +937,21 @@ class InferenceService:
         ready_line = self._readline_with_timeout(self.startup_timeout_seconds)
         if ready_line is None:
             if self.process and self.process.poll() is not None:
-                print(f"✗ 推理进程启动失败（未收到 READY，退出码 {self.process.returncode}）")
+                self.last_engine_error = f"推理进程启动失败（未收到 READY，退出码 {self.process.returncode}）"
             else:
-                print(f"✗ 推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）")
+                self.last_engine_error = f"推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）"
+            print(f"✗ {self.last_engine_error}")
             self._stop_process()
             return
         if ready_line.strip() != "[READY]":
-            print(f"✗ 推理引擎启动异常，收到: {ready_line.strip()}")
+            self.last_engine_error = f"推理引擎启动异常，收到: {ready_line.strip()}"
+            print(f"✗ {self.last_engine_error}")
             self._stop_process()
             return
 
         print("=" * 50)
         print("推理模式: 常驻进程（每条消息触发一次 generate）")
+        print(f"  当前模型: {self.current_model_name} ({self.current_model_family})")
         print(f"  可执行文件: {self.executable}")
         print(f"  model_selection: {self.model_selection_source}")
         print(f"  模型: {os.path.basename(self.model_path)}")
@@ -782,51 +1022,54 @@ class InferenceService:
     def is_running(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
-    def generate(self, prompt: str, history: List[Dict] = None) -> str:
-        if not self.is_ready():
-            return self._mock_response(prompt)
+    def generate(self, prompt: str, history: List[Dict] = None, model_id: Optional[str] = None) -> str:
+        with self.lock:
+            if model_id:
+                self.switch_model(model_id, start=False)
 
-        req_id = self._next_request_id()
-        start_time = time.monotonic()
-        safe_history = history or []
-        model_prompt = self._build_prompt(prompt, safe_history)
-        effective_prompt_format = self._effective_prompt_format()
-        print(
-            f"[Inference][{req_id}] start: history={len(safe_history)} "
-            f"prompt_chars={len(model_prompt)} max_new_tokens={self.max_new_tokens} "
-            f"prompt_format={effective_prompt_format}"
-        )
-        self._init_trace(
-            req_id=req_id,
-            prompt=prompt,
-            history_size=len(safe_history),
-            prompt_format=effective_prompt_format,
-        )
+            if not self.is_ready():
+                return self._mock_response(prompt)
 
-        if not self.is_running():
-            self._start_engine()
+            req_id = self._next_request_id()
+            start_time = time.monotonic()
+            safe_history = history or []
+            model_prompt = self._build_prompt(prompt, safe_history)
+            effective_prompt_format = self._effective_prompt_format()
+            print(
+                f"[Inference][{req_id}] start: model={self.current_model_name} family={self.current_model_family} "
+                f"history={len(safe_history)} prompt_chars={len(model_prompt)} "
+                f"max_new_tokens={self.max_new_tokens} prompt_format={effective_prompt_format}"
+            )
+            self._init_trace(
+                req_id=req_id,
+                prompt=prompt,
+                history_size=len(safe_history),
+                prompt_format=effective_prompt_format,
+            )
 
-        if self.is_running():
-            response = self._generate_with_process(model_prompt)
-        else:
-            # 兜底：进程模式不可用时仍可单次调用
-            response = self._generate_once(model_prompt)
+            if not self.is_running():
+                self._start_engine()
 
-        elapsed = time.monotonic() - start_time
-        failed = (
-            response.startswith("推理超时")
-            or response.startswith("推理请求发送失败")
-            or response.startswith("推理进程")
-            or response.startswith("推理异常")
-        )
-        self._complete_trace(
-            state="error" if failed else "completed",
-            response_text=response,
-            error=response if failed else "",
-            elapsed=elapsed,
-        )
-        print(f"[Inference][{req_id}] done: elapsed={elapsed:.2f}s response_chars={len(response)}")
-        return response
+            if self.is_running():
+                response = self._generate_with_process(model_prompt)
+            else:
+                response = self._generate_once(model_prompt)
+
+            elapsed = time.monotonic() - start_time
+            failed = (
+                response.startswith("推理超时")
+                or response.startswith("推理请求发送失败")
+                or response.startswith("推理进程")
+                or response.startswith("推理异常")
+            )
+            self._complete_trace(
+                state="error" if failed else "completed",
+                response_text=response,
+                error=response if failed else "",
+                elapsed=elapsed,
+            )
+            print(f"[Inference][{req_id}] done: elapsed={elapsed:.2f}s response_chars={len(response)}")
+            return response
 
     def _build_prompt(self, prompt: str, history: List[Dict]) -> str:
         effective_prompt_format = self._effective_prompt_format()
@@ -839,7 +1082,6 @@ class InferenceService:
         if not self.raw_with_history:
             return clean_prompt
 
-        # raw 模式下可选拼接少量对话历史，格式尽量接近自然文本
         messages: List[Dict[str, str]] = []
         for message in history[-self.max_history_messages :]:
             if not isinstance(message, dict):
@@ -934,75 +1176,73 @@ class InferenceService:
         return selected
 
     def _generate_with_process(self, model_prompt: str) -> str:
-        with self.lock:
-            if not self.is_running() or not self.process:
-                return "推理进程未运行，请稍后重试。"
-            if not self.process.stdin:
-                return "推理进程 stdin 不可用。"
+        if not self.is_running() or not self.process:
+            return "推理进程未运行，请稍后重试。"
+        if not self.process.stdin:
+            return "推理进程 stdin 不可用。"
 
-            try:
-                self.process.stdin.write("[PROMPT_START]\n")
-                self.process.stdin.write(model_prompt)
-                if not model_prompt.endswith("\n"):
-                    self.process.stdin.write("\n")
-                self.process.stdin.write("[PROMPT_END]\n")
-                self.process.stdin.flush()
-            except Exception as exc:
+        try:
+            self.process.stdin.write("[PROMPT_START]\n")
+            self.process.stdin.write(model_prompt)
+            if not model_prompt.endswith("\n"):
+                self.process.stdin.write("\n")
+            self.process.stdin.write("[PROMPT_END]\n")
+            self.process.stdin.flush()
+        except Exception as exc:
+            self._stop_process()
+            return f"推理请求发送失败: {exc}"
+
+        response_lines: List[str] = []
+        in_response = False
+        deadline = time.monotonic() + float(self.timeout_seconds)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 self._stop_process()
-                return f"推理请求发送失败: {exc}"
+                return f"推理超时（{self.timeout_seconds}s），请减少上下文或降低生成步数。"
 
-            response_lines: List[str] = []
-            in_response = False
-            deadline = time.monotonic() + float(self.timeout_seconds)
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
+            line = self._readline_with_timeout(remaining)
+            if line is None:
+                if self.process.poll() is None:
                     self._stop_process()
                     return f"推理超时（{self.timeout_seconds}s），请减少上下文或降低生成步数。"
+                self._stop_process()
+                return "推理进程已退出，请重试。"
 
-                line = self._readline_with_timeout(remaining)
-                if line is None:
-                    if self.process.poll() is None:
-                        self._stop_process()
-                        return f"推理超时（{self.timeout_seconds}s），请减少上下文或降低生成步数。"
-                    self._stop_process()
-                    return "推理进程已退出，请重试。"
+            text = line.rstrip("\n")
+            if self._consume_trace_line(text):
+                continue
+            if text == "[RESPONSE_START]":
+                in_response = True
+                continue
+            if text == "[RESPONSE_END]":
+                break
+            if in_response:
+                response_lines.append(text)
 
-                text = line.rstrip("\n")
-                if self._consume_trace_line(text):
-                    continue
-                if text == "[RESPONSE_START]":
-                    in_response = True
-                    continue
-                if text == "[RESPONSE_END]":
-                    break
-                if in_response:
-                    response_lines.append(text)
-
-            response = self._sanitize_response_text("\n".join(response_lines).strip())
-            return response if response else "（模型未生成有效回复）"
+        response = self._sanitize_response_text("\n".join(response_lines).strip())
+        return response if response else "（模型未生成有效回复）"
 
     def _generate_once(self, model_prompt: str) -> str:
-        with self.lock:
-            try:
-                completed = subprocess.run(
-                    [
-                        self.executable,
-                        self.model_path,
-                        self.tokenizer_path,
-                        model_prompt,
-                        str(self.max_new_tokens),
-                    ],
-                    cwd=self.engine_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds,
-                    env={**os.environ, "CUDA_VISIBLE_DEVICES": os.getenv("CUDA_VISIBLE_DEVICES", "0")},
-                )
-            except subprocess.TimeoutExpired:
-                return f"推理超时（{self.timeout_seconds}s），请减少上下文或降低生成步数。"
-            except Exception as exc:
-                return f"推理进程启动失败: {exc}"
+        try:
+            completed = subprocess.run(
+                [
+                    self.executable,
+                    self.model_path,
+                    self.tokenizer_path,
+                    model_prompt,
+                    str(self.max_new_tokens),
+                ],
+                cwd=self.engine_path,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                env={**os.environ, "CUDA_VISIBLE_DEVICES": os.getenv("CUDA_VISIBLE_DEVICES", "0")},
+            )
+        except subprocess.TimeoutExpired:
+            return f"推理超时（{self.timeout_seconds}s），请减少上下文或降低生成步数。"
+        except Exception as exc:
+            return f"推理进程启动失败: {exc}"
 
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
@@ -1047,7 +1287,6 @@ class InferenceService:
 
     @staticmethod
     def _sanitize_response_text(text: str) -> str:
-        """压制模型连续重复刷屏输出。"""
         content = (text or "").strip()
         if not content:
             return ""
@@ -1077,6 +1316,8 @@ class InferenceService:
         return "\n".join(kept).strip()
 
     def debug_status(self) -> Dict[str, object]:
+        current_candidate = self._find_candidate_by_id(self.current_model_id)
+        current_model = self._serialize_model(current_candidate) if current_candidate else None
         return {
             "ready": self.is_ready(),
             "running": self.is_running(),
@@ -1089,6 +1330,11 @@ class InferenceService:
             "configured_model_dir": settings.INFERENCE_MODEL_DIR,
             "configured_model_path": settings.INFERENCE_MODEL_PATH,
             "configured_tokenizer_path": settings.INFERENCE_TOKENIZER_PATH,
+            "current_model_id": self.current_model_id,
+            "current_model_name": self.current_model_name,
+            "current_model_family": self.current_model_family,
+            "current_model": current_model,
+            "available_models_count": len(self.available_models),
             "max_new_tokens": self.max_new_tokens,
             "prompt_format": self.prompt_format,
             "effective_prompt_format": self._effective_prompt_format(),
@@ -1101,6 +1347,7 @@ class InferenceService:
             "eager_start": self.eager_start,
             "pid": self.process.pid if self.process and self.is_running() else None,
             "trace_state": self.trace_status().get("state", "idle"),
+            "last_engine_error": self.last_engine_error,
         }
 
     def _mock_response(self, prompt: str) -> str:
@@ -1109,18 +1356,19 @@ class InferenceService:
 你的问题是: {prompt}
 
 请检查:
-- 可执行文件(qwen_infer): {'✓' if self.executable else '❌ 未找到'}
+- 当前模型: {self.current_model_name or '未选择'}
+- 可执行文件: {'✓' if self.executable else '❌ 未找到'}
 - 模型文件: {'✓' if self.model_path else '❌ 未找到'}
 - 分词器(tokenizer.json): {'✓' if self.tokenizer_path else '❌ 未找到'}
+- 额外信息: {self.last_engine_error or '无'}
 """
 
     def clear_history(self):
-        """当前实现按请求传完整 history，无进程内会话态。"""
         return None
 
     def shutdown(self):
-        self._stop_process()
+        with self.lock:
+            self._stop_process()
 
 
-# 全局单例
 inference_service = InferenceService()

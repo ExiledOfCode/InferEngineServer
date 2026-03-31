@@ -175,9 +175,11 @@ export const chatApi = {
   createConversation: (data = {}) => api.post('/conversations', data),
   deleteConversation: (id) => api.delete(`/conversations/${id}`),
   getMessages: (id) => api.get(`/conversations/${id}/messages`),
-  sendMessage: (id, content) => api.post(`/conversations/${id}/messages`, { content }),
+  sendMessage: (id, content, modelId) => api.post(`/conversations/${id}/messages`, { content, model_id: modelId || null }),
   getInferenceStatus: () => api.get('/inference/status'),
-  getInferenceTrace: () => api.get('/inference/trace')
+  getInferenceTrace: () => api.get('/inference/trace'),
+  getInferenceModels: () => api.get('/inference/models'),
+  selectInferenceModel: (modelId, eagerStart = true) => api.post('/inference/models/select', { model_id: modelId, eager_start: eagerStart })
 }
 
 export default api

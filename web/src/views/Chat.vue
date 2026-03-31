@@ -58,9 +58,26 @@
       <header class="chat-header">
         <div class="header-meta">
           <h1>{{ currentTitle }}</h1>
-          <p>江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}</p>
+          <p>江屿大模型 · {{ engineSummaryText }}</p>
         </div>
         <div class="header-actions">
+          <div class="model-switcher">
+            <span class="model-switcher-label">推理模型</span>
+            <el-select
+              v-model="chatStore.selectedModelId"
+              class="model-switcher-select"
+              placeholder="选择模型"
+              :disabled="chatStore.loading || chatStore.switchingModel || modelOptions.length === 0"
+              @change="handleModelChange"
+            >
+              <el-option
+                v-for="model in modelOptions"
+                :key="model.id"
+                :label="formatModelOptionLabel(model)"
+                :value="model.id"
+              />
+            </el-select>
+          </div>
           <button class="trace-toggle-btn" @click="toggleTraceSidebar">
             {{ traceSidebarCollapsed ? '展开过程' : '收起过程' }}
           </button>
@@ -111,18 +128,18 @@
             :rows="1"
             :autosize="{ minRows: 1, maxRows: 8 }"
             placeholder="给 江屿大模型 发消息"
-            :disabled="chatStore.loading"
+            :disabled="chatStore.loading || chatStore.switchingModel"
             @keydown.enter.exact.prevent="handleSend"
           />
           <button
             class="send-btn"
-            :disabled="!inputMessage.trim() || chatStore.loading"
+            :disabled="!inputMessage.trim() || chatStore.loading || chatStore.switchingModel"
             @click="handleSend"
           >
             <el-icon><Promotion /></el-icon>
           </button>
         </div>
-        <p class="composer-note">模型可能会犯错，请核对重要信息。</p>
+        <p class="composer-note">{{ composerNote }}</p>
       </footer>
     </section>
 
@@ -295,6 +312,26 @@ let statusTimer = null
 const currentTitle = computed(() => chatStore.currentConversation?.title || '新对话')
 const activeTrace = computed(() => chatStore.inferenceTrace || null)
 const traceSteps = computed(() => (Array.isArray(activeTrace.value?.steps) ? activeTrace.value.steps : []))
+const modelOptions = computed(() => {
+  const all = Array.isArray(chatStore.availableModels) ? chatStore.availableModels : []
+  return all.filter(item => item?.supported)
+})
+const currentModelName = computed(() => chatStore.inferenceStatus?.current_model_name || '未选择模型')
+const engineSummaryText = computed(() => {
+  if (chatStore.switchingModel) {
+    return `正在切换到 ${currentModelName.value}`
+  }
+  if (chatStore.inferenceStatus?.running) {
+    return `${currentModelName.value} 已连接`
+  }
+  return `${currentModelName.value} 未加载`
+})
+const composerNote = computed(() => {
+  if (chatStore.switchingModel) {
+    return '正在切换模型：会先下线旧模型，再启动新模型。'
+  }
+  return '模型可能会犯错，请核对重要信息。'
+})
 const traceStateText = computed(() => {
   const state = String(activeTrace.value?.state || '').toLowerCase()
   if (state === 'running') return '运行中'
@@ -412,6 +449,12 @@ function formatDuration(ms) {
   return `${value.toFixed(2)} ms`
 }
 
+function formatModelOptionLabel(model) {
+  const name = model?.name || '未命名模型'
+  const family = model?.family ? String(model.family).toUpperCase() : 'MODEL'
+  return `${name} · ${family}`
+}
+
 function startTraceResize(event) {
   if (window.innerWidth <= 1100 || traceSidebarCollapsed.value) {
     return
@@ -459,6 +502,11 @@ onMounted(async () => {
     await chatStore.fetchConversations()
   } catch (e) {
     ElMessage.error(formatErrorMessage(e, '加载对话列表失败'))
+  }
+  try {
+    await chatStore.fetchInferenceModels()
+  } catch (e) {
+    ElMessage.warning(formatErrorMessage(e, '无法获取模型列表'))
   }
   try {
     const status = await chatStore.fetchInferenceStatus()
@@ -519,10 +567,27 @@ async function handleNewChat() {
 
 async function handleSend() {
   const content = inputMessage.value.trim()
-  if (!content || chatStore.loading) return
+  if (!content || chatStore.loading || chatStore.switchingModel) return
   inputMessage.value = ''
   await chatStore.sendMessage(content)
   nextTick(() => inputRef.value?.focus && inputRef.value.focus())
+}
+
+async function handleModelChange(modelId) {
+  const nextModelId = String(modelId || '').trim()
+  if (!nextModelId) {
+    return
+  }
+  try {
+    const status = await chatStore.switchModel(nextModelId)
+    if (status?.running) {
+      ElMessage.success(`已切换到 ${status.current_model_name || '新模型'}`)
+    } else {
+      ElMessage.warning(status?.last_engine_error || '模型已切换，但推理进程尚未启动')
+    }
+  } catch (error) {
+    ElMessage.error(formatErrorMessage(error, '切换模型失败'))
+  }
 }
 
 async function handleDelete(id) {
@@ -851,6 +916,36 @@ function handleLogout() {
 .header-actions {
   display: inline-flex;
   align-items: center;
+  gap: 10px;
+}
+
+.model-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.model-switcher-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.model-switcher-select {
+  width: 240px;
+}
+
+.model-switcher-select :deep(.el-select__wrapper) {
+  min-height: 34px;
+  border-radius: 10px;
+  background: #f6f8fc;
+  box-shadow: none;
+}
+
+.model-switcher-select :deep(.el-select__placeholder),
+.model-switcher-select :deep(.el-select__selected-item) {
+  font-size: 13px;
 }
 
 .trace-toggle-btn {
@@ -1376,6 +1471,18 @@ function handleLogout() {
 
   .chat-header {
     padding: 0 14px;
+  }
+
+  .header-actions {
+    gap: 8px;
+  }
+
+  .model-switcher-label {
+    display: none;
+  }
+
+  .model-switcher-select {
+    width: 170px;
   }
 
   .message-track,
