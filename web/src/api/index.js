@@ -164,6 +164,9 @@ export const authApi = {
 
 export const adminApi = {
   getStats: () => api.get('/admin/stats'),
+  getInferenceStatus: () => api.get('/admin/inference/status'),
+  getInferenceOptions: () => api.get('/admin/inference/options'),
+  updateInferenceOptions: (data) => api.put('/admin/inference/options', data),
   getUsers: () => api.get('/admin/users'),
   createUser: (data) => api.post('/admin/users', data),
   updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
@@ -176,8 +179,11 @@ export const chatApi = {
   deleteConversation: (id) => api.delete(`/conversations/${id}`),
   getMessages: (id) => api.get(`/conversations/${id}/messages`),
   sendMessage: (id, content) => api.post(`/conversations/${id}/messages`, { content }),
+  cancelInference: () => api.post('/inference/cancel'),
   getInferenceStatus: () => api.get('/inference/status'),
-  getInferenceTrace: () => api.get('/inference/trace')
+  getInferenceTrace: () => api.get('/inference/trace'),
+  getInferenceModels: () => api.get('/inference/models'),
+  selectInferenceModel: (modelId) => api.post('/inference/model/select', { model_id: modelId })
 }
 
 export default api

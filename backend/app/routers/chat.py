@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 import time
@@ -8,8 +8,9 @@ from ..models.conversation import Conversation
 from ..models.message import Message
 from ..schemas.conversation import ConversationCreate, ConversationResponse
 from ..schemas.message import MessageCreate, MessageResponse, MessageWithTraceResponse
+from ..schemas.inference import InferenceModelSelectRequest
 from ..utils.security import get_current_chat_user
-from ..services.inference_service import inference_service
+from ..services.inference_service import InferenceCancelledError, inference_service
 
 router = APIRouter()
 
@@ -23,6 +24,36 @@ def get_inference_status(current_user: User = Depends(get_current_chat_user)):
 def get_inference_trace(current_user: User = Depends(get_current_chat_user)):
     """查看最近一次推理的阶段埋点"""
     return inference_service.trace_status()
+
+
+@router.get("/inference/models")
+def get_inference_models(current_user: User = Depends(get_current_chat_user)):
+    """查看可切换模型列表"""
+    return {
+        "current_model_id": inference_service.debug_status().get("current_model_id"),
+        "models": inference_service.list_models(),
+    }
+
+
+@router.post("/inference/model/select")
+def select_inference_model(
+    data: InferenceModelSelectRequest,
+    current_user: User = Depends(get_current_chat_user),
+):
+    """切换当前推理模型"""
+    try:
+        return inference_service.select_model(data.model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/inference/cancel")
+def cancel_inference(current_user: User = Depends(get_current_chat_user)):
+    """停止当前推理，但保持模型进程在线"""
+    result = inference_service.request_cancel()
+    if not result.get("accepted"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.get("detail") or "取消失败")
+    return result
 
 @router.get("/conversations", response_model=List[ConversationResponse])
 def get_conversations(db: Session = Depends(get_db), current_user: User = Depends(get_current_chat_user)):
@@ -119,13 +150,21 @@ def send_message(
     ).order_by(Message.created_at.asc()).all()
     
     history = [{"role": msg.role, "content": msg.content} for msg in history_messages]
+    if len(history) <= 1:
+        conversation.title = data.content[:50] + ("..." if len(data.content) > 50 else "")
+        db.commit()
     
     # 调用推理引擎
     infer_start = time.monotonic()
     try:
-        ai_response = inference_service.generate(data.content, history)
+        ai_raw_response = inference_service.generate(data.content, history)
+    except InferenceCancelledError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
-        ai_response = f"推理异常: {exc}"
+        ai_raw_response = f"推理异常: {exc}"
+    parsed_response = inference_service.parse_assistant_response(ai_raw_response)
+    ai_response = parsed_response.get("content") or "（模型未生成有效回复）"
     infer_elapsed = time.monotonic() - infer_start
     if not ai_response.strip():
         ai_response = "（模型未生成有效回复）"
@@ -138,13 +177,11 @@ def send_message(
     assistant_message = Message(
         conversation_id=conversation_id,
         role="assistant",
-        content=ai_response
+        content=ai_response,
+        reasoning_content=parsed_response.get("reasoning_content"),
+        raw_content=parsed_response.get("raw_content"),
     )
     db.add(assistant_message)
-    
-    # 更新对话标题（如果是第一条消息）
-    if len(history) <= 1:
-        conversation.title = data.content[:50] + ("..." if len(data.content) > 50 else "")
     
     db.commit()
     db.refresh(assistant_message)
@@ -154,6 +191,8 @@ def send_message(
         conversation_id=assistant_message.conversation_id,
         role=assistant_message.role,
         content=assistant_message.content,
+        reasoning_content=assistant_message.reasoning_content,
+        raw_content=assistant_message.raw_content,
         created_at=assistant_message.created_at,
         inference_trace=inference_service.trace_status(),
     )

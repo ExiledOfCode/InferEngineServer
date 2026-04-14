@@ -1,0 +1,10 @@
+{
+  "updated_at": 1776143674.2929804,
+  "options": {
+    "trace_enabled": true,
+    "warmup_on_model_switch": true
+  },
+  "settings": {
+    "max_new_tokens": 1024
+  }
+}

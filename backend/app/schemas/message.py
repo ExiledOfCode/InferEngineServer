@@ -10,6 +10,8 @@ class MessageResponse(BaseModel):
     conversation_id: int
     role: str
     content: str
+    reasoning_content: Optional[str] = None
+    raw_content: Optional[str] = None
     created_at: datetime
     
     class Config:

@@ -49,9 +49,21 @@ function formatApiError(err) {
   return [detail, status, requestLine].filter(Boolean).join(' | ')
 }
 
+function isInferenceCancelledError(err) {
+  const detail = String(err?.detail || err?.message || '').toLowerCase()
+  return err?.status === 409 && (detail.includes('取消') || detail.includes('cancel'))
+}
+
 function normalizeAssistantMessage(payload) {
   if (payload && typeof payload === 'object' && typeof payload.content === 'string') {
-    return { ...payload, content: sanitizeAssistantContent(payload.content) }
+    const normalized = { ...payload, content: sanitizeAssistantContent(payload.content) }
+    if (typeof payload.reasoning_content === 'string') {
+      normalized.reasoning_content = sanitizeAssistantContent(payload.reasoning_content)
+    }
+    if (typeof payload.raw_content === 'string') {
+      normalized.raw_content = sanitizeAssistantContent(payload.raw_content)
+    }
+    return normalized
   }
   if (typeof payload === 'string') {
     return {
@@ -75,7 +87,14 @@ function normalizeMessages(messages) {
   }
   return messages.map(msg => {
     if (msg?.role === 'assistant' && typeof msg?.content === 'string') {
-      return { ...msg, content: sanitizeAssistantContent(msg.content) }
+      const normalized = { ...msg, content: sanitizeAssistantContent(msg.content) }
+      if (typeof msg?.reasoning_content === 'string') {
+        normalized.reasoning_content = sanitizeAssistantContent(msg.reasoning_content)
+      }
+      if (typeof msg?.raw_content === 'string') {
+        normalized.raw_content = sanitizeAssistantContent(msg.raw_content)
+      }
+      return normalized
     }
     return msg
   })
@@ -86,10 +105,16 @@ export const useChatStore = defineStore('chat', () => {
   const currentConversation = ref(null)
   const messages = ref([])
   const loading = ref(false)
+  const canceling = ref(false)
   const loadingConversationId = ref(null)
   const creatingConversation = ref(false)
+  const switchingModel = ref(false)
   const inferenceStatus = ref(null)
   const inferenceTrace = ref(null)
+
+  function isTraceEnabled() {
+    return inferenceStatus.value?.trace_enabled !== false
+  }
 
   async function fetchConversations() {
     conversations.value = await chatApi.getConversations()
@@ -141,12 +166,73 @@ export const useChatStore = defineStore('chat', () => {
 
   async function fetchInferenceStatus() {
     inferenceStatus.value = await chatApi.getInferenceStatus()
+    if (!isTraceEnabled()) {
+      inferenceTrace.value = {
+        state: 'disabled',
+        enabled: false,
+        steps: []
+      }
+    }
     return inferenceStatus.value
   }
 
   async function fetchInferenceTrace() {
+    if (!isTraceEnabled()) {
+      inferenceTrace.value = {
+        state: 'disabled',
+        enabled: false,
+        steps: []
+      }
+      return inferenceTrace.value
+    }
     inferenceTrace.value = await chatApi.getInferenceTrace()
     return inferenceTrace.value
+  }
+
+  async function switchInferenceModel(modelId) {
+    const nextId = String(modelId || '').trim()
+    if (!nextId || switchingModel.value) {
+      return inferenceStatus.value
+    }
+    switchingModel.value = true
+    try {
+      inferenceStatus.value = await chatApi.selectInferenceModel(nextId)
+      inferenceTrace.value = isTraceEnabled()
+        ? null
+        : {
+            state: 'disabled',
+            enabled: false,
+            steps: []
+          }
+      return inferenceStatus.value
+    } finally {
+      switchingModel.value = false
+    }
+  }
+
+  async function cancelGeneration() {
+    if (!loading.value || canceling.value) {
+      return false
+    }
+
+    canceling.value = true
+    try {
+      await chatApi.cancelInference()
+      if (inferenceTrace.value && typeof inferenceTrace.value === 'object') {
+        inferenceTrace.value = {
+          ...inferenceTrace.value,
+          cancel_requested: true
+        }
+      }
+      return true
+    } catch (err) {
+      if (err?.status === 409) {
+        return false
+      }
+      throw err
+    } finally {
+      canceling.value = false
+    }
   }
 
   async function sendMessage(content) {
@@ -172,13 +258,27 @@ export const useChatStore = defineStore('chat', () => {
         // ignore trace polling errors
       }
     }
-    await pollTrace()
-    traceTimer = window.setInterval(pollTrace, 700)
+    if (isTraceEnabled()) {
+      await pollTrace()
+      traceTimer = window.setInterval(pollTrace, 700)
+    } else {
+      inferenceTrace.value = {
+        state: 'disabled',
+        enabled: false,
+        steps: []
+      }
+    }
 
     try {
       const response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content))
       if (response?.inference_trace) {
         inferenceTrace.value = response.inference_trace
+      } else if (!isTraceEnabled()) {
+        inferenceTrace.value = {
+          state: 'disabled',
+          enabled: false,
+          steps: []
+        }
       }
       // 优先以后端数据库为准回拉，避免前后端状态漂移
       try {
@@ -190,6 +290,17 @@ export const useChatStore = defineStore('chat', () => {
         currentConversation.value.title = content.slice(0, 50)
       }
     } catch (err) {
+      if (isInferenceCancelledError(err)) {
+        try {
+          messages.value = normalizeMessages(await chatApi.getMessages(convId))
+        } catch {
+          // ignore refresh error after cancel
+        }
+        if (currentConversation.value && (!currentConversation.value.title || currentConversation.value.title === '新对话')) {
+          currentConversation.value.title = content.slice(0, 50)
+        }
+        return
+      }
       try {
         messages.value = normalizeMessages(await chatApi.getMessages(convId))
       } catch {
@@ -208,10 +319,18 @@ export const useChatStore = defineStore('chat', () => {
         window.clearInterval(traceTimer)
         traceTimer = null
       }
-      try {
-        await fetchInferenceTrace()
-      } catch {
-        // ignore final trace refresh
+      if (isTraceEnabled()) {
+        try {
+          await fetchInferenceTrace()
+        } catch {
+          // ignore final trace refresh
+        }
+      } else {
+        inferenceTrace.value = {
+          state: 'disabled',
+          enabled: false,
+          steps: []
+        }
       }
       try {
         await fetchInferenceStatus()
@@ -228,8 +347,10 @@ export const useChatStore = defineStore('chat', () => {
     currentConversation,
     messages,
     loading,
+    canceling,
     loadingConversationId,
     creatingConversation,
+    switchingModel,
     inferenceStatus,
     inferenceTrace,
     fetchConversations,
@@ -238,6 +359,8 @@ export const useChatStore = defineStore('chat', () => {
     selectConversation,
     fetchInferenceStatus,
     fetchInferenceTrace,
+    switchInferenceModel,
+    cancelGeneration,
     sendMessage
   }
 })

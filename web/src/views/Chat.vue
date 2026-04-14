@@ -58,9 +58,38 @@
       <header class="chat-header">
         <div class="header-meta">
           <h1>{{ currentTitle }}</h1>
-          <p>江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}</p>
+          <p>
+            江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}
+            <template v-if="currentModelName"> · {{ currentModelName }}</template>
+          </p>
         </div>
         <div class="header-actions">
+          <div class="model-switcher">
+            <span class="model-switcher-label">模型</span>
+            <el-select
+              v-model="selectedModelId"
+              class="model-switcher-select"
+              size="small"
+              placeholder="选择模型"
+              :disabled="chatStore.loading || chatStore.switchingModel"
+              @change="handleModelChange"
+            >
+              <el-option
+                v-for="model in availableModels"
+                :key="model.id"
+                :label="model.name"
+                :value="model.id"
+                :disabled="!model.ready"
+              >
+                <div class="model-option">
+                  <span>{{ model.name }}</span>
+                  <span class="model-option-meta">
+                    {{ model.family || 'model' }}{{ model.ready ? '' : ' · 未就绪' }}
+                  </span>
+                </div>
+              </el-option>
+            </el-select>
+          </div>
           <button class="trace-toggle-btn" @click="toggleTraceSidebar">
             {{ traceSidebarCollapsed ? '展开过程' : '收起过程' }}
           </button>
@@ -83,8 +112,17 @@
             <div v-if="msg.role !== 'user'" class="assistant-avatar">
               <el-icon><Monitor /></el-icon>
             </div>
-            <div class="message-body" :class="msg.role">
-              {{ msg.content }}
+            <div class="message-body" :class="[msg.role, { thinking: msg.role === 'assistant' && !!msg.reasoning_content }]">
+              <template v-if="msg.role === 'assistant' && msg.reasoning_content">
+                <details class="assistant-think-panel">
+                  <summary>思考过程</summary>
+                  <pre class="assistant-think-text">{{ msg.reasoning_content }}</pre>
+                </details>
+                <div class="assistant-answer-text">{{ msg.content }}</div>
+              </template>
+              <template v-else>
+                {{ msg.content }}
+              </template>
             </div>
           </article>
 
@@ -116,10 +154,13 @@
           />
           <button
             class="send-btn"
-            :disabled="!inputMessage.trim() || chatStore.loading"
-            @click="handleSend"
+            :class="{ stopping: chatStore.loading, busy: chatStore.canceling }"
+            :disabled="chatStore.loading ? chatStore.canceling : !inputMessage.trim()"
+            :title="chatStore.loading ? '停止生成' : '发送消息'"
+            @click="handleComposerAction"
           >
-            <el-icon><Promotion /></el-icon>
+            <span v-if="chatStore.loading" class="send-btn-stop-square" aria-hidden="true"></span>
+            <el-icon v-else><Promotion /></el-icon>
           </button>
         </div>
         <p class="composer-note">模型可能会犯错，请核对重要信息。</p>
@@ -155,8 +196,9 @@
         </div>
 
         <div v-if="traceSteps.length === 0" class="trace-empty">
-          <p v-if="chatStore.loading">正在等待推理埋点...</p>
-          <p v-else>发送消息后，这里会显示 Tokenization / Encoding / Inference / Sampling / Decode。</p>
+          <p v-if="!traceEnabled">管理员已关闭数据埋点，当前不会显示推理过程。</p>
+          <p v-else-if="chatStore.loading">正在等待推理埋点...</p>
+          <p v-else-if="traceEnabled">发送消息后，这里会显示 Tokenization / Encoding / Inference / Sampling / Decode。</p>
         </div>
 
         <section v-for="step in traceSteps" :key="step.id" class="trace-step">
@@ -193,7 +235,7 @@
               <pre class="value">{{ (step.operations || []).join(' → ') || 'attention → hidden_states → logits' }}</pre>
             </div>
             <div class="trace-field">
-              <span class="label">Qwen2 逻辑流程图</span>
+              <span class="label">{{ logicFlowLabel }}</span>
               <div class="logic-flow">
                 <div class="logic-main-row">
                   <div class="logic-node logic-node-input">
@@ -377,22 +419,36 @@ const traceSidebarMaxWidth = 860
 const traceResizing = ref(false)
 const traceResizeStartX = ref(0)
 const traceResizeStartWidth = ref(460)
+const selectedModelId = ref('')
 let statusTimer = null
 
 const currentTitle = computed(() => chatStore.currentConversation?.title || '新对话')
+const availableModels = computed(() => (Array.isArray(chatStore.inferenceStatus?.available_models) ? chatStore.inferenceStatus.available_models : []))
+const currentModelName = computed(() => chatStore.inferenceStatus?.current_model_name || '')
+const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.current_model_family || '').toLowerCase())
+const traceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
+const logicFlowLabel = computed(() => {
+  if (currentModelFamily.value === 'qwen3') return 'Qwen3 逻辑流程图'
+  if (currentModelFamily.value === 'qwen2') return 'Qwen2 逻辑流程图'
+  return '当前模型逻辑流程图'
+})
 const activeTrace = computed(() => chatStore.inferenceTrace || null)
 const traceSteps = computed(() => (Array.isArray(activeTrace.value?.steps) ? activeTrace.value.steps : []))
 const traceStateText = computed(() => {
   const state = String(activeTrace.value?.state || '').toLowerCase()
+  if (state === 'disabled') return '已关闭'
   if (state === 'running') return '运行中'
   if (state === 'completed') return '已完成'
+  if (state === 'cancelled') return '已停止'
   if (state === 'error') return '异常'
   return chatStore.loading ? '运行中' : '待机'
 })
 const traceStateClass = computed(() => {
   const state = String(activeTrace.value?.state || '').toLowerCase()
+  if (state === 'disabled') return 'idle'
   if (state === 'running') return 'running'
   if (state === 'completed') return 'completed'
+  if (state === 'cancelled') return 'cancelled'
   if (state === 'error') return 'error'
   return 'idle'
 })
@@ -404,9 +460,9 @@ const traceSidebarStyle = computed(() => {
 })
 const logicalNodeOps = {
   rmsnorm1: ['attn.rmsnorm'],
-  attention: ['attn.wq', 'attn.wk', 'attn.wv', 'attn.rope', 'attn.mha', 'attn.wo'],
-  wq: ['attn.wq'],
-  wk: ['attn.wk'],
+  attention: ['attn.wq', 'attn.q_norm', 'attn.wk', 'attn.k_norm', 'attn.wv', 'attn.rope', 'attn.mha', 'attn.wo'],
+  wq: ['attn.wq', 'attn.q_norm'],
+  wk: ['attn.wk', 'attn.k_norm'],
   wv: ['attn.wv'],
   rope: ['attn.rope'],
   mha: ['attn.mha'],
@@ -595,6 +651,14 @@ watch(
   }
 )
 
+watch(
+  () => chatStore.inferenceStatus?.current_model_id,
+  value => {
+    selectedModelId.value = String(value || '')
+  },
+  { immediate: true }
+)
+
 async function handleSelectConversation(id) {
   await chatStore.selectConversation(id)
 }
@@ -610,6 +674,33 @@ async function handleSend() {
   inputMessage.value = ''
   await chatStore.sendMessage(content)
   nextTick(() => inputRef.value?.focus && inputRef.value.focus())
+}
+
+async function handleComposerAction() {
+  if (chatStore.loading) {
+    try {
+      await chatStore.cancelGeneration()
+    } catch (e) {
+      ElMessage.error(formatErrorMessage(e, '停止生成失败'))
+    }
+    return
+  }
+  await handleSend()
+}
+
+async function handleModelChange(modelId) {
+  const nextId = String(modelId || '').trim()
+  const currentId = String(chatStore.inferenceStatus?.current_model_id || '').trim()
+  if (!nextId || nextId === currentId) {
+    return
+  }
+  try {
+    await chatStore.switchInferenceModel(nextId)
+    ElMessage.success(`已切换到 ${chatStore.inferenceStatus?.current_model_name || nextId}`)
+  } catch (e) {
+    selectedModelId.value = currentId
+    ElMessage.error(formatErrorMessage(e, '切换模型失败'))
+  }
 }
 
 async function handleDelete(id) {
@@ -938,6 +1029,47 @@ function handleLogout() {
 .header-actions {
   display: inline-flex;
   align-items: center;
+  gap: 10px;
+}
+
+.model-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-switcher-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.model-switcher-select {
+  width: 240px;
+}
+
+.model-switcher-select :deep(.el-select__wrapper) {
+  min-height: 34px;
+  border-radius: 10px;
+  background: #f6f8fc;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.model-switcher-select :deep(.el-select__placeholder),
+.model-switcher-select :deep(.el-select__selected-item) {
+  font-size: 13px;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-option-meta {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .trace-toggle-btn {
@@ -1046,10 +1178,52 @@ function handleLogout() {
   color: var(--text-primary);
 }
 
+.message-body.assistant.thinking {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .message-body.user {
   background: var(--surface-user-message);
   border: 1px solid #d2d9e6;
   color: #1a2233;
+}
+
+.assistant-think-panel {
+  border-radius: 12px;
+  border: 1px solid #d8e2f0;
+  background: #f8fbff;
+  overflow: hidden;
+}
+
+.assistant-think-panel summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #36537c;
+  background: #eef4fb;
+}
+
+.assistant-think-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-think-text {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #52637d;
+}
+
+.assistant-answer-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-body.loading {
@@ -1134,16 +1308,36 @@ function handleLogout() {
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 
 .send-btn:hover:not(:disabled) {
   background: var(--accent-color-strong);
 }
 
+.send-btn.stopping {
+  background: #1f2937;
+}
+
+.send-btn.stopping:hover:not(:disabled) {
+  background: #111827;
+  transform: scale(0.98);
+}
+
+.send-btn.busy {
+  opacity: 0.72;
+}
+
 .send-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.send-btn-stop-square {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: currentColor;
 }
 
 .composer-note {
@@ -1248,6 +1442,10 @@ function handleLogout() {
 
 .trace-state-value.completed {
   color: #166534;
+}
+
+.trace-state-value.cancelled {
+  color: #c2410c;
 }
 
 .trace-state-value.error {

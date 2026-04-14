@@ -5,7 +5,9 @@ from ..database import get_db
 from ..models.user import User
 from ..models.conversation import Conversation
 from ..models.message import Message
+from ..schemas.inference import InferenceEngineOptionsResponse, InferenceEngineOptionsUpdateRequest
 from ..schemas.user import UserCreate, UserUpdate, UserResponse
+from ..services.inference_service import inference_service
 from ..utils.security import get_current_admin, get_password_hash
 
 router = APIRouter()
@@ -22,6 +24,33 @@ def get_stats(db: Session = Depends(get_db), current_admin: User = Depends(get_c
         "conversation_count": conversation_count,
         "message_count": message_count
     }
+
+@router.get("/inference/status")
+def get_inference_status(current_admin: User = Depends(get_current_admin)):
+    """获取当前推理引擎状态"""
+    return inference_service.debug_status()
+
+@router.get("/inference/options", response_model=InferenceEngineOptionsResponse)
+def get_inference_options(current_admin: User = Depends(get_current_admin)):
+    """获取引擎优化配置"""
+    return inference_service.engine_options_status()
+
+@router.put("/inference/options", response_model=InferenceEngineOptionsResponse)
+def update_inference_options(
+    data: InferenceEngineOptionsUpdateRequest,
+    current_admin: User = Depends(get_current_admin),
+):
+    """更新引擎优化配置"""
+    try:
+        if data.options:
+            inference_service.update_engine_options(data.options)
+        if data.max_new_tokens is not None:
+            return inference_service.update_generation_settings(data.max_new_tokens)
+        return inference_service.engine_options_status()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 @router.get("/users", response_model=List[UserResponse])
 def get_users(db: Session = Depends(get_db), current_admin: User = Depends(get_current_admin)):
