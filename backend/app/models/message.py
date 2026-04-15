@@ -12,6 +12,7 @@ class Message(Base):
     content = Column(Text, nullable=False)
     reasoning_content = Column(Text, nullable=True)
     raw_content = Column(Text, nullable=True)
+    inference_trace = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     conversation = relationship("Conversation", back_populates="messages")

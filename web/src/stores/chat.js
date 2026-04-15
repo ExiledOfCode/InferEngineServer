@@ -100,6 +100,17 @@ function normalizeMessages(messages) {
   })
 }
 
+function pickLatestStoredTrace(messages) {
+  if (!Array.isArray(messages)) return null
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const item = messages[i]
+    if (item?.role === 'assistant' && item?.inference_trace && typeof item.inference_trace === 'object') {
+      return item.inference_trace
+    }
+  }
+  return null
+}
+
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref([])
   const currentConversation = ref(null)
@@ -154,13 +165,27 @@ export const useChatStore = defineStore('chat', () => {
     if (currentConversation.value?.id === id) {
       currentConversation.value = null
       messages.value = []
+      inferenceTrace.value = null
     }
   }
 
   async function selectConversation(id) {
     currentConversation.value = conversations.value.find(c => c.id === id) || null
     if (currentConversation.value) {
-      messages.value = normalizeMessages(await chatApi.getMessages(id))
+      const loaded = normalizeMessages(await chatApi.getMessages(id))
+      messages.value = loaded
+      const storedTrace = pickLatestStoredTrace(loaded)
+      if (storedTrace) {
+        inferenceTrace.value = storedTrace
+      } else if (!isTraceEnabled()) {
+        inferenceTrace.value = {
+          state: 'disabled',
+          enabled: false,
+          steps: []
+        }
+      } else {
+        inferenceTrace.value = null
+      }
     }
   }
 

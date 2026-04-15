@@ -85,8 +85,11 @@ class InferenceService:
         self.default_raw_with_history = self._read_bool("INFERENCE_RAW_WITH_HISTORY", False)
         self.raw_with_history = self.default_raw_with_history
         self.default_system_prompt = (
-            os.getenv("INFERENCE_SYSTEM_PROMPT", "You are a helpful assistant.").strip()
-            or "You are a helpful assistant."
+            os.getenv(
+                "INFERENCE_SYSTEM_PROMPT",
+                "你是一个乐于助人的中文 AI 助手。请用简洁、自然的中文回答。"
+            ).strip()
+            or "你是一个乐于助人的中文 AI 助手。请用简洁、自然的中文回答。"
         )
         self.system_prompt = self.default_system_prompt
 
@@ -486,6 +489,8 @@ class InferenceService:
             }
 
         reasoning_content = after_open[:think_end].strip() or None
+        if reasoning_content:
+            reasoning_content = cls._sanitize_reasoning_text(reasoning_content) or None
         answer_content = cls._strip_response_prefix(after_open[think_end + len(cls.THINK_CLOSE_TAG) :]) or None
         display_content = answer_content or (cls.THINK_NO_ANSWER_FALLBACK if reasoning_content else "")
         return {
@@ -496,6 +501,22 @@ class InferenceService:
             "think_mode": True,
             "answer_complete": bool(answer_content),
         }
+
+    @staticmethod
+    def _sanitize_reasoning_text(text: str) -> str:
+        """尽量过滤“跑偏”的思考输出，避免把内部标注展示给前端。"""
+        if not text:
+            return ""
+        kept: List[str] = []
+        for raw_line in str(text).replace("\r\n", "\n").replace("\r", "\n").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            lower = line.lower()
+            if lower.startswith("utterance:"):
+                continue
+            kept.append(raw_line.strip())
+        return "\n".join(kept).strip()
 
     @classmethod
     def _history_safe_content(cls, role: str, content: str) -> str:
@@ -718,9 +739,9 @@ class InferenceService:
 
             if step_id == "tokenization":
                 if isinstance(event.get("input_text"), str):
-                    step["input_text"] = self._truncate_text(event["input_text"], 320)
+                    step["input_text"] = event["input_text"]
                 if isinstance(event.get("tokens_preview"), list):
-                    step["tokens_preview"] = [self._truncate_text(item, 48) for item in event["tokens_preview"][:32]]
+                    step["tokens_preview"] = [str(item) for item in event["tokens_preview"]]
                 if isinstance(event.get("token_count"), (int, float)):
                     step["token_count"] = int(event["token_count"])
                 if "truncated" in event:
@@ -728,7 +749,7 @@ class InferenceService:
             elif step_id == "encoding":
                 if isinstance(event.get("token_ids_preview"), list):
                     values = []
-                    for item in event["token_ids_preview"][:64]:
+                    for item in event["token_ids_preview"]:
                         try:
                             values.append(int(item))
                         except Exception:
@@ -789,16 +810,16 @@ class InferenceService:
                     selected_list = step.setdefault("selected_tokens", [])
                     selected_list.append(
                         {
-                            "token": self._truncate_text(str(selected_token or ""), 64),
+                            "token": str(selected_token or ""),
                             "token_id": int(selected_token_id) if isinstance(selected_token_id, (int, float)) else None,
                             "index": int(event.get("sample_index")) if isinstance(event.get("sample_index"), (int, float)) else None,
                         }
                     )
-                    if len(selected_list) > 24:
-                        step["selected_tokens"] = selected_list[-24:]
+                    if len(selected_list) > 256:
+                        step["selected_tokens"] = selected_list[-256:]
             elif step_id == "decode":
                 if isinstance(event.get("generated_text_preview"), str):
-                    step["generated_text_preview"] = self._truncate_text(event["generated_text_preview"], 380)
+                    step["generated_text_preview"] = event["generated_text_preview"]
                 if isinstance(event.get("generated_char_count"), (int, float)):
                     step["generated_char_count"] = int(event["generated_char_count"])
 
@@ -1801,21 +1822,39 @@ class InferenceService:
             return content
 
         kept: List[str] = []
-        prev_norm = ""
+        prev_key = ""
         same_run = 0
         for line in lines:
             norm = line.strip()
-            if norm and norm == prev_norm and len(norm) <= 48:
+            key = norm.replace("<think>", "").replace("</think>", "").strip()
+
+            if key and key == prev_key and len(key) <= 200:
                 same_run += 1
-                if same_run >= 2 and len(norm) <= 32:
-                    if kept and kept[-1].strip() == norm:
+                # 对短句（常见问候）更激进：出现第二次就终止，避免“你好...”刷屏
+                if same_run >= 2 and len(key) <= 32:
+                    if kept and kept[-1].strip().replace("<think>", "").replace("</think>", "").strip() == key:
                         kept.pop()
                     break
+                # 对中等长度重复：保留前两条，后续去重
                 if same_run >= 3:
                     continue
             else:
-                prev_norm = norm
+                prev_key = key
                 same_run = 1
+
+            # 兼容某些模型在 <think> 中反复输出 utterance: "..."
+            if key.lower().startswith("utterance:"):
+                # 不能丢失 think 边界标记
+                if "<think>" in norm.lower() or "</think>" in norm.lower():
+                    kept.append(line)
+                    continue
+                recent = [
+                    item.strip().replace("<think>", "").replace("</think>", "").strip()
+                    for item in kept[-2:]
+                ]
+                if key in recent:
+                    continue
+
             kept.append(line)
 
         return "\n".join(kept).strip()

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 import time
+import json
 from ..database import get_db
 from ..models.user import User
 from ..models.conversation import Conversation
@@ -117,7 +118,27 @@ def get_messages(
         Message.conversation_id == conversation_id
     ).order_by(Message.created_at.asc()).all()
     
-    return messages
+    results: List[MessageResponse] = []
+    for msg in messages:
+        trace_payload = None
+        if msg.inference_trace:
+            try:
+                trace_payload = json.loads(msg.inference_trace)
+            except Exception:
+                trace_payload = None
+        results.append(
+            MessageResponse(
+                id=msg.id,
+                conversation_id=msg.conversation_id,
+                role=msg.role,
+                content=msg.content,
+                reasoning_content=msg.reasoning_content,
+                raw_content=msg.raw_content,
+                inference_trace=trace_payload,
+                created_at=msg.created_at,
+            )
+        )
+    return results
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageWithTraceResponse)
 def send_message(
@@ -174,12 +195,14 @@ def send_message(
     )
     
     # 保存AI回复
+    trace_payload = inference_service.trace_status()
     assistant_message = Message(
         conversation_id=conversation_id,
         role="assistant",
         content=ai_response,
         reasoning_content=parsed_response.get("reasoning_content"),
         raw_content=parsed_response.get("raw_content"),
+        inference_trace=json.dumps(trace_payload, ensure_ascii=False) if trace_payload else None,
     )
     db.add(assistant_message)
     
@@ -194,5 +217,5 @@ def send_message(
         reasoning_content=assistant_message.reasoning_content,
         raw_content=assistant_message.raw_content,
         created_at=assistant_message.created_at,
-        inference_trace=inference_service.trace_status(),
+        inference_trace=trace_payload,
     )

@@ -112,8 +112,8 @@ INFERENCE_MAX_NEW_TOKENS=128
 INFERENCE_EAGER_START=false
 # prompt 格式：auto / chatml / raw
 INFERENCE_PROMPT_FORMAT=auto
-# chatml 模式系统提示词
-INFERENCE_SYSTEM_PROMPT=You are a helpful assistant.
+# chatml 模式系统提示词（中文环境建议中文；允许 think 但要避免“跑偏”）
+INFERENCE_SYSTEM_PROMPT=你是一个乐于助人的中文AI助手。请用简洁、自然的中文回答，避免逐字重复同一句话。如果需要展示思考过程，请用<think>...</think>包裹，并且不要在<think>里输出utterance:等内部标注；打招呼时只回复一次并询问对方需求。
 # raw 模式是否拼接历史上下文
 INFERENCE_RAW_WITH_HISTORY=false
 

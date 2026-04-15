@@ -107,7 +107,8 @@
             v-for="msg in chatStore.messages"
             :key="msg.id"
             class="message-row"
-            :class="msg.role"
+            :class="[msg.role, { clickable: msg.role === 'assistant' && !!msg.inference_trace }]"
+            @click="handleMessageClick(msg)"
           >
             <div v-if="msg.role !== 'user'" class="assistant-avatar">
               <el-icon><Monitor /></el-icon>
@@ -196,9 +197,9 @@
         </div>
 
         <div v-if="traceSteps.length === 0" class="trace-empty">
-          <p v-if="!traceEnabled">管理员已关闭数据埋点，当前不会显示推理过程。</p>
+          <p v-if="!engineTraceEnabled">管理员已关闭数据埋点，且当前会话没有历史埋点记录。</p>
           <p v-else-if="chatStore.loading">正在等待推理埋点...</p>
-          <p v-else-if="traceEnabled">发送消息后，这里会显示 Tokenization / Encoding / Inference / Sampling / Decode。</p>
+          <p v-else>发送消息后，这里会显示 Tokenization / Encoding / Inference / Sampling / Decode。</p>
         </div>
 
         <section v-for="step in traceSteps" :key="step.id" class="trace-step">
@@ -212,11 +213,11 @@
           <template v-if="step.id === 'tokenization'">
             <div class="trace-field">
               <span class="label">输入文本</span>
-              <pre class="value">{{ step.input_text || '-' }}</pre>
+              <pre class="value trace-scrollbox trace-scrollbox--text">{{ step.input_text || '-' }}</pre>
             </div>
             <div class="trace-field">
               <span class="label">Tokens ({{ step.token_count || 0 }})</span>
-              <div class="token-list">
+              <div class="token-list trace-scrollbox trace-scrollbox--box trace-scrollbox--tokens">
                 <span v-for="(token, idx) in (step.tokens_preview || [])" :key="`${step.id}-token-${idx}`" class="token-chip">{{ token }}</span>
               </div>
             </div>
@@ -225,7 +226,7 @@
           <template v-else-if="step.id === 'encoding'">
             <div class="trace-field">
               <span class="label">Token IDs ({{ step.token_count || 0 }})</span>
-              <pre class="value">{{ formatTokenIds(step.token_ids_preview) }}</pre>
+              <pre class="value trace-scrollbox trace-scrollbox--text">{{ formatTokenIds(step.token_ids_preview) }}</pre>
             </div>
           </template>
 
@@ -369,16 +370,13 @@
             </div>
             <div class="trace-field" v-if="(step.selected_tokens || []).length > 0">
               <span class="label">已选 token</span>
-              <div class="sample-list">
+              <div class="sample-list trace-scrollbox trace-scrollbox--box trace-scrollbox--text">
                 <span
-                  v-for="item in (step.selected_tokens || []).slice(-8)"
+                  v-for="item in (step.selected_tokens || [])"
                   :key="`${step.id}-${item.index}-${item.token_id}`"
                   class="sample-item"
                 >
                   #{{ item.index || '-' }} → {{ item.token || '' }} ({{ item.token_id ?? '-' }})
-                </span>
-                <span v-if="samplingRemainingCount(step) > 0" class="sample-item sample-ellipsis">
-                  ... 省略 {{ samplingRemainingCount(step) }} 个 token
                 </span>
               </div>
             </div>
@@ -387,7 +385,7 @@
           <template v-else-if="step.id === 'decode'">
             <div class="trace-field">
               <span class="label">生成文本</span>
-              <pre class="value">{{ step.generated_text_preview || '-' }}</pre>
+              <pre class="value trace-scrollbox trace-scrollbox--text">{{ step.generated_text_preview || '-' }}</pre>
             </div>
           </template>
         </section>
@@ -426,7 +424,7 @@ const currentTitle = computed(() => chatStore.currentConversation?.title || '新
 const availableModels = computed(() => (Array.isArray(chatStore.inferenceStatus?.available_models) ? chatStore.inferenceStatus.available_models : []))
 const currentModelName = computed(() => chatStore.inferenceStatus?.current_model_name || '')
 const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.current_model_family || '').toLowerCase())
-const traceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
+const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
 const logicFlowLabel = computed(() => {
   if (currentModelFamily.value === 'qwen3') return 'Qwen3 逻辑流程图'
   if (currentModelFamily.value === 'qwen2') return 'Qwen2 逻辑流程图'
@@ -710,6 +708,18 @@ async function handleDelete(id) {
     ElMessage.success('已删除')
   } catch {
     // ignore cancel
+  }
+}
+
+function handleMessageClick(message) {
+  if (!message || message.role !== 'assistant') {
+    return
+  }
+  if (message.inference_trace && typeof message.inference_trace === 'object') {
+    chatStore.inferenceTrace = message.inference_trace
+    if (traceSidebarCollapsed.value) {
+      traceSidebarCollapsed.value = false
+    }
   }
 }
 
@@ -1149,6 +1159,27 @@ function handleLogout() {
   justify-content: flex-end;
 }
 
+.message-row.clickable {
+  cursor: pointer;
+}
+
+.message-row.clickable .assistant-avatar,
+.message-row.clickable .message-body.assistant {
+  transition: box-shadow 0.22s ease, transform 0.18s ease, border-color 0.22s ease, background 0.22s ease;
+}
+
+.message-row.clickable:hover .assistant-avatar {
+  box-shadow: 0 10px 24px rgba(47, 74, 128, 0.16);
+  transform: translateY(-1px);
+}
+
+.message-row.clickable:hover .message-body.assistant {
+  border-color: #b7c6de;
+  background: #f9fbff;
+  box-shadow: 0 14px 30px rgba(31, 47, 82, 0.08);
+  transform: translateY(-1px);
+}
+
 .assistant-avatar {
   width: 30px;
   height: 30px;
@@ -1518,6 +1549,26 @@ function handleLogout() {
   color: #111827;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.trace-scrollbox {
+  max-height: 200px;
+  overflow: auto;
+}
+
+.trace-scrollbox--tokens {
+  max-height: 200px;
+}
+
+.trace-scrollbox--text {
+  max-height: 220px;
+}
+
+.trace-scrollbox--box {
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: #f4f7fd;
+  border: 1px solid #e1e7f2;
 }
 
 .token-list,

@@ -84,11 +84,11 @@ class Settings(BaseSettings):
   },
   {
     "id": "qwen2_0_5b",
-    "name": "Qwen2-0.5B",
+    "name": "Qwen2.5-0.5B",
     "family": "qwen2",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2-0.5B",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2-0.5B/Qwen2-0.5B.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2-0.5B/tokenizer.json",
+    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B",
+    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B/Qwen2.5-0.5B.bin",
+    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B/tokenizer.json",
     "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen_infer",
     "prompt_format": "chatml"
   }

@@ -12,6 +12,7 @@ class MessageResponse(BaseModel):
     content: str
     reasoning_content: Optional[str] = None
     raw_content: Optional[str] = None
+    inference_trace: Optional[Dict[str, Any]] = None
     created_at: datetime
     
     class Config:

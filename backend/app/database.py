@@ -30,6 +30,8 @@ def ensure_database_schema():
         statements.append("ALTER TABLE messages ADD COLUMN reasoning_content TEXT NULL")
     if "raw_content" not in columns:
         statements.append("ALTER TABLE messages ADD COLUMN raw_content TEXT NULL")
+    if "inference_trace" not in columns:
+        statements.append("ALTER TABLE messages ADD COLUMN inference_trace TEXT NULL")
 
     if not statements:
         return
