@@ -858,6 +858,24 @@ class InferenceService:
         for raw_line in str(stdout).splitlines():
             self._consume_trace_line(raw_line)
 
+    @staticmethod
+    def _append_diag_line(lines: List[str], line: str, limit: int = 8):
+        text = str(line or "").strip()
+        if not text:
+            return
+        lines.append(text)
+        if len(lines) > limit:
+            del lines[:-limit]
+
+    @staticmethod
+    def _format_diag_lines(lines: List[str]) -> str:
+        if not lines:
+            return ""
+        joined = " | ".join(str(item).strip() for item in lines if str(item).strip())
+        if len(joined) > 600:
+            joined = joined[-600:]
+        return joined
+
     def _complete_trace(self, state: str, response_text: str = "", error: str = "", elapsed: Optional[float] = None):
         if not self.trace_enabled:
             return
@@ -1400,7 +1418,7 @@ class InferenceService:
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -1414,16 +1432,36 @@ class InferenceService:
             return
 
         self._start_stdout_reader()
-        ready_line = self._readline_with_timeout(self.startup_timeout_seconds)
-        if ready_line is None:
+        startup_logs: List[str] = []
+        deadline = time.monotonic() + float(self.startup_timeout_seconds)
+        ready = False
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            ready_line = self._readline_with_timeout(remaining)
+            if ready_line is None:
+                break
+            text = ready_line.rstrip("\n")
+            if text.strip() == "[READY]":
+                ready = True
+                break
+            if self._consume_trace_line(text):
+                continue
+            self._append_diag_line(startup_logs, text)
+
+        if not ready:
+            detail = self._format_diag_lines(startup_logs)
             if self.process and self.process.poll() is not None:
-                print(f"✗ 推理进程启动失败（未收到 READY，退出码 {self.process.returncode}）")
+                message = f"✗ 推理进程启动失败（未收到 READY，退出码 {self.process.returncode}）"
+                if detail:
+                    message += f"，最近日志: {detail}"
+                print(message)
             else:
-                print(f"✗ 推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）")
-            self._stop_process()
-            return
-        if ready_line.strip() != "[READY]":
-            print(f"✗ 推理引擎启动异常，收到: {ready_line.strip()}")
+                message = f"✗ 推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）"
+                if detail:
+                    message += f"，最近日志: {detail}"
+                print(message)
             self._stop_process()
             return
 
@@ -1709,6 +1747,7 @@ class InferenceService:
                     return f"推理请求发送失败: {exc}"
 
             response_lines: List[str] = []
+            diag_lines: List[str] = []
             in_response = False
             cancelled = False
             deadline = time.monotonic() + float(self.timeout_seconds)
@@ -1720,11 +1759,16 @@ class InferenceService:
 
                 line = self._readline_with_timeout(remaining)
                 if line is None:
+                    detail = self._format_diag_lines(diag_lines)
                     time.sleep(0.1)
                     if self.process.poll() is None:
                         self._stop_process()
+                        if detail:
+                            return f"推理进程输出中断，请检查模型输出编码或进程日志。最近日志: {detail}"
                         return "推理进程输出中断，请检查模型输出编码或进程日志。"
                     self._stop_process()
+                    if detail:
+                        return f"推理进程已退出，请重试。最近日志: {detail}"
                     return "推理进程已退出，请重试。"
 
                 text = line.rstrip("\n")
@@ -1740,6 +1784,8 @@ class InferenceService:
                     break
                 if in_response:
                     response_lines.append(text)
+                else:
+                    self._append_diag_line(diag_lines, text)
 
             if cancelled:
                 raise InferenceCancelledError("推理已取消")

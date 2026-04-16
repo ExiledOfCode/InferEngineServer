@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     "max_new_tokens": 256
   },
   {
+    "id": "qwen3_1_7b_bf16",
+    "name": "Qwen3-1.7B-BF16",
+    "family": "qwen3",
+    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B",
+    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B/Qwen3-1.7B-bf16.bin",
+    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B/tokenizer.json",
+    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen3_infer",
+    "prompt_format": "chatml",
+    "max_new_tokens": 256
+  },
+  {
     "id": "qwen3_0_6b",
     "name": "Qwen3-0.6B",
     "family": "qwen3",
