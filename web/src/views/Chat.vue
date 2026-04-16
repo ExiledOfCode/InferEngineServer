@@ -90,9 +90,16 @@
               </el-option>
             </el-select>
           </div>
-          <button class="trace-toggle-btn" @click="toggleTraceSidebar">
-            {{ traceSidebarCollapsed ? '展开过程' : '收起过程' }}
-          </button>
+          <div class="think-toggle">
+            <span class="think-toggle-label">Think</span>
+            <el-switch
+              v-model="thinkEnabled"
+              size="small"
+              inline-prompt
+              active-text="开"
+              inactive-text="关"
+            />
+          </div>
         </div>
       </header>
 
@@ -113,8 +120,8 @@
             <div v-if="msg.role !== 'user'" class="assistant-avatar">
               <el-icon><Monitor /></el-icon>
             </div>
-            <div class="message-body" :class="[msg.role, { thinking: msg.role === 'assistant' && !!msg.reasoning_content }]">
-              <template v-if="msg.role === 'assistant' && msg.reasoning_content">
+            <div class="message-body" :class="[msg.role, { thinking: msg.role === 'assistant' && !!msg.reasoning_content && thinkEnabled }]">
+              <template v-if="msg.role === 'assistant' && msg.reasoning_content && thinkEnabled">
                 <details class="assistant-think-panel">
                   <summary>思考过程</summary>
                   <pre class="assistant-think-text">{{ msg.reasoning_content }}</pre>
@@ -418,6 +425,8 @@ const traceResizing = ref(false)
 const traceResizeStartX = ref(0)
 const traceResizeStartWidth = ref(460)
 const selectedModelId = ref('')
+const THINK_PREFERENCE_KEY = 'chat:show-think'
+const thinkEnabled = ref(readThinkPreference())
 let statusTimer = null
 
 const currentTitle = computed(() => chatStore.currentConversation?.title || '新对话')
@@ -473,6 +482,14 @@ const logicalNodeOps = {
   swiglu: ['ffn.swiglu'],
   w2: ['ffn.w2'],
   residual2: ['ffn.residual_add2']
+}
+
+function readThinkPreference() {
+  try {
+    return localStorage.getItem(THINK_PREFERENCE_KEY) !== '0'
+  } catch {
+    return true
+  }
 }
 
 function formatErrorMessage(error, fallback) {
@@ -657,6 +674,14 @@ watch(
   { immediate: true }
 )
 
+watch(thinkEnabled, value => {
+  try {
+    localStorage.setItem(THINK_PREFERENCE_KEY, value ? '1' : '0')
+  } catch {
+    // ignore persistence failures
+  }
+})
+
 async function handleSelectConversation(id) {
   await chatStore.selectConversation(id)
 }
@@ -670,7 +695,7 @@ async function handleSend() {
   const content = inputMessage.value.trim()
   if (!content || chatStore.loading) return
   inputMessage.value = ''
-  await chatStore.sendMessage(content)
+  await chatStore.sendMessage(content, thinkEnabled.value)
   nextTick(() => inputRef.value?.focus && inputRef.value.focus())
 }
 
@@ -1021,11 +1046,11 @@ function handleLogout() {
 }
 
 .chat-header {
-  height: 62px;
+  min-height: 62px;
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(8px);
-  padding: 0 22px;
+  padding: 10px 22px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1040,6 +1065,8 @@ function handleLogout() {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .model-switcher {
@@ -1082,20 +1109,26 @@ function handleLogout() {
   font-size: 12px;
 }
 
-.trace-toggle-btn {
+.think-toggle {
   height: 34px;
   border-radius: 10px;
   border: 1px solid var(--border-subtle);
   background: #f6f8fc;
-  color: var(--text-secondary);
-  padding: 0 12px;
-  font-size: 13px;
-  cursor: pointer;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.trace-toggle-btn:hover {
-  background: #edf3fa;
-  border-color: #c7d0df;
+.think-toggle-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.think-toggle :deep(.el-switch) {
+  --el-switch-on-color: var(--accent-color);
+  --el-switch-off-color: #c8d1df;
 }
 
 .header-meta h1 {
@@ -1799,7 +1832,8 @@ function handleLogout() {
   }
 
   .chat-header {
-    padding: 0 14px;
+    padding: 10px 14px;
+    align-items: flex-start;
   }
 
   .message-track,

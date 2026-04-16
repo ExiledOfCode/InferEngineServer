@@ -668,7 +668,7 @@ class InferenceService:
             return "chatml"
         return "raw"
 
-    def _init_trace(self, req_id: int, prompt: str, history_size: int, prompt_format: str):
+    def _init_trace(self, req_id: int, prompt: str, history_size: int, prompt_format: str, think_enabled: bool):
         if not self.trace_enabled:
             return
         trace = {
@@ -679,6 +679,7 @@ class InferenceService:
             "cancel_requested": False,
             "history_size": int(history_size),
             "prompt_format": prompt_format,
+            "think_enabled": bool(think_enabled),
             "prompt_preview": self._truncate_text(prompt, 280),
             "model_id": self.current_model_id,
             "model_name": self.current_model_name,
@@ -1553,25 +1554,26 @@ class InferenceService:
     def is_running(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
-    def generate(self, prompt: str, history: List[Dict] = None) -> str:
+    def generate(self, prompt: str, history: List[Dict] = None, think_enabled: bool = True) -> str:
         if not self.is_ready():
             return self._mock_response(prompt)
 
         req_id = self._next_request_id()
         start_time = time.monotonic()
         safe_history = history or []
-        model_prompt = self._build_prompt(prompt, safe_history)
+        model_prompt = self._build_prompt(prompt, safe_history, think_enabled=think_enabled)
         effective_prompt_format = self._effective_prompt_format()
         print(
             f"[Inference][{req_id}] start: model={self.current_model_id} history={len(safe_history)} "
             f"prompt_chars={len(model_prompt)} max_new_tokens={self.max_new_tokens} "
-            f"prompt_format={effective_prompt_format}"
+            f"prompt_format={effective_prompt_format} think_enabled={bool(think_enabled)}"
         )
         self._init_trace(
             req_id=req_id,
             prompt=prompt,
             history_size=len(safe_history),
             prompt_format=effective_prompt_format,
+            think_enabled=bool(think_enabled),
         )
         self._activate_request(req_id)
 
@@ -1616,11 +1618,11 @@ class InferenceService:
         print(f"[Inference][{req_id}] done: elapsed={elapsed:.2f}s response_chars={len(response)}")
         return response
 
-    def _build_prompt(self, prompt: str, history: List[Dict]) -> str:
+    def _build_prompt(self, prompt: str, history: List[Dict], think_enabled: bool = True) -> str:
         effective_prompt_format = self._effective_prompt_format()
         if effective_prompt_format == "raw":
             return self._build_raw_prompt(prompt, history)
-        return self._build_chatml_prompt(prompt, history)
+        return self._build_chatml_prompt(prompt, history, think_enabled=think_enabled)
 
     def _build_raw_prompt(self, prompt: str, history: List[Dict]) -> str:
         clean_prompt = (prompt or "").strip()
@@ -1654,7 +1656,7 @@ class InferenceService:
         parts.append("助手:")
         return "\n".join(parts).strip()
 
-    def _build_chatml_prompt(self, prompt: str, history: List[Dict]) -> str:
+    def _build_chatml_prompt(self, prompt: str, history: List[Dict], think_enabled: bool = True) -> str:
         messages: List[Dict[str, str]] = []
         for message in history[-self.max_history_messages :]:
             if not isinstance(message, dict):
@@ -1682,8 +1684,11 @@ class InferenceService:
 
         parts = []
         for message in messages:
-            parts.append(f"<|im_start|>{message['role']}:\n{message['content']}<|im_end|>")
-        parts.append("<|im_start|>assistant:\n")
+            parts.append(f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>")
+        if self.current_model_family == "qwen3" and not think_enabled:
+            parts.append("<|im_start|>assistant\n<think>\n\n</think>\n\n")
+        else:
+            parts.append("<|im_start|>assistant\n")
         return "\n".join(parts)
 
     def _truncate_messages_by_chars(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:

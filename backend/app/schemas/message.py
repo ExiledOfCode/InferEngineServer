@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 class MessageCreate(BaseModel):
     content: str
+    think_enabled: bool = True
 
 class MessageResponse(BaseModel):
     id: int

@@ -260,7 +260,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function sendMessage(content) {
+  async function sendMessage(content, thinkEnabled = true) {
     if (!currentConversation.value) {
       await createConversation()
     }
@@ -295,7 +295,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      const response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content))
+      const response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content, thinkEnabled))
       if (response?.inference_trace) {
         inferenceTrace.value = response.inference_trace
       } else if (!isTraceEnabled()) {

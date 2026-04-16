@@ -178,7 +178,11 @@ def send_message(
     # 调用推理引擎
     infer_start = time.monotonic()
     try:
-        ai_raw_response = inference_service.generate(data.content, history)
+        ai_raw_response = inference_service.generate(
+            data.content,
+            history,
+            think_enabled=data.think_enabled,
+        )
     except InferenceCancelledError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))

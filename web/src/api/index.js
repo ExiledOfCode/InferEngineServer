@@ -178,7 +178,10 @@ export const chatApi = {
   createConversation: (data = {}) => api.post('/conversations', data),
   deleteConversation: (id) => api.delete(`/conversations/${id}`),
   getMessages: (id) => api.get(`/conversations/${id}/messages`),
-  sendMessage: (id, content) => api.post(`/conversations/${id}/messages`, { content }),
+  sendMessage: (id, content, thinkEnabled = true) => api.post(
+    `/conversations/${id}/messages`,
+    { content, think_enabled: thinkEnabled }
+  ),
   cancelInference: () => api.post('/inference/cancel'),
   getInferenceStatus: () => api.get('/inference/status'),
   getInferenceTrace: () => api.get('/inference/trace'),
