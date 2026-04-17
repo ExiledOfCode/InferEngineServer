@@ -173,8 +173,47 @@
                   </template>
                 </div>
               </div>
-              <div class="message-actions">
-                <button class="message-action-btn" type="button" @click.stop="handleCopyMessage(msg)">复制</button>
+              <div class="message-actions" @click.stop>
+                <button
+                  class="message-action-btn"
+                  type="button"
+                  aria-label="复制"
+                  data-tooltip="复制"
+                  @click.stop="handleCopyMessage(msg)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="5" width="11" height="13" rx="2"></rect>
+                    <rect x="4" y="10" width="11" height="9" rx="2"></rect>
+                  </svg>
+                </button>
+                <button
+                  class="message-action-btn"
+                  :class="{ active: isMessageFeedbackActive(msg, 'like') }"
+                  type="button"
+                  aria-label="点赞"
+                  data-tooltip="点赞"
+                  @click.stop="handleMessageFeedback(msg, 'like')"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 10v10"></path>
+                    <path d="M7 10H4.8A1.8 1.8 0 0 0 3 11.8v6.4A1.8 1.8 0 0 0 4.8 20H7"></path>
+                    <path d="M7 10l4.6-6.2c.7-.9 2.1-.5 2.1.7V9h4.6c1.2 0 2.1 1 1.9 2.2l-1 6.6A2.6 2.6 0 0 1 16.6 20H7"></path>
+                  </svg>
+                </button>
+                <button
+                  class="message-action-btn"
+                  :class="{ active: isMessageFeedbackActive(msg, 'dislike') }"
+                  type="button"
+                  aria-label="点踩"
+                  data-tooltip="点踩"
+                  @click.stop="handleMessageFeedback(msg, 'dislike')"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M17 14V4"></path>
+                    <path d="M17 14h2.2a1.8 1.8 0 0 0 1.8-1.8V5.8A1.8 1.8 0 0 0 19.2 4H17"></path>
+                    <path d="M17 14l-4.6 6.2c-.7.9-2.1.5-2.1-.7V15H5.7c-1.2 0-2.1-1-1.9-2.2l1-6.6A2.6 2.6 0 0 1 7.4 4H17"></path>
+                  </svg>
+                </button>
               </div>
             </div>
           </article>
@@ -683,6 +722,33 @@ async function handleCopyMessage(message) {
   }
 }
 
+function canPersistMessageFeedback(message) {
+  return Boolean(message?.id && message?.conversation_id && !message?.pending)
+}
+
+function isMessageFeedbackActive(message, feedback) {
+  return String(message?.feedback || '') === feedback
+}
+
+async function handleMessageFeedback(message, feedback) {
+  if (!canPersistMessageFeedback(message)) {
+    ElMessage.warning('消息保存后才能标记')
+    return
+  }
+
+  const nextFeedback = isMessageFeedbackActive(message, feedback) ? null : feedback
+  try {
+    await chatStore.updateMessageFeedback(message.id, nextFeedback)
+    if (!nextFeedback) {
+      ElMessage.success('已取消标记')
+    } else {
+      ElMessage.success(nextFeedback === 'like' ? '已点赞' : '已点踩')
+    }
+  } catch (err) {
+    ElMessage.error(err?.detail || '标记失败')
+  }
+}
+
 function startTraceResize(event) {
   if (window.innerWidth <= 1100 || traceSidebarCollapsed.value) {
     return
@@ -756,7 +822,7 @@ onMounted(async () => {
     } catch {
       // ignore polling error
     }
-  }, 10000)
+  }, 500)
 })
 
 onBeforeUnmount(() => {
@@ -1421,7 +1487,7 @@ function handleLogout() {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 34px;
+  gap: 12px;
 }
 
 .welcome-card {
@@ -1517,47 +1583,86 @@ function handleLogout() {
 }
 
 .message-actions {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 4;
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  margin-top: 2px;
   opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.16s ease;
+  visibility: hidden;
+  transition: opacity 0.14s ease, visibility 0.14s ease;
 }
 
 .message-row.user .message-actions {
-  right: 0;
-  left: auto;
+  justify-content: flex-end;
 }
 
-.message-row:hover .message-actions,
-.message-row:focus-within .message-actions {
+.message-stack:hover .message-actions,
+.message-stack:focus-within .message-actions,
+.message-actions:hover {
   opacity: 1;
-  pointer-events: auto;
+  visibility: visible;
 }
 
 .message-action-btn {
-  min-width: 34px;
-  height: 28px;
-  border: 1px solid #cfd8e6;
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border: 0;
   border-radius: 8px;
-  background: #fff;
-  color: var(--text-secondary);
-  padding: 0 10px;
-  font-size: 12px;
-  line-height: 26px;
+  background: transparent;
+  color: #6f6f6f;
+  padding: 0;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(31, 47, 82, 0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.message-action-btn svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .message-action-btn:hover {
-  border-color: #aab8cc;
-  color: var(--text-primary);
-  background: #f8fafc;
+  color: #111;
+  background: #eeeeee;
+}
+
+.message-action-btn.active {
+  color: #111;
+  background: #e9e9e9;
+}
+
+.message-action-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%) translateY(-2px);
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #0b0b0b;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.message-action-btn:hover::after,
+.message-action-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .message-body.assistant {

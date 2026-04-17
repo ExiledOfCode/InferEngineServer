@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 class MessageCreate(BaseModel):
     content: str
@@ -14,6 +14,7 @@ class MessageResponse(BaseModel):
     reasoning_content: Optional[str] = None
     raw_content: Optional[str] = None
     inference_trace: Optional[Dict[str, Any]] = None
+    feedback: Optional[Literal["like", "dislike"]] = None
     created_at: datetime
     
     class Config:
@@ -22,3 +23,7 @@ class MessageResponse(BaseModel):
 
 class MessageWithTraceResponse(MessageResponse):
     inference_trace: Optional[Dict[str, Any]] = None
+
+
+class MessageFeedbackUpdate(BaseModel):
+    feedback: Optional[Literal["like", "dislike"]] = None

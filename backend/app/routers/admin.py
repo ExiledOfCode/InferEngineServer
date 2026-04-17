@@ -44,8 +44,11 @@ def update_inference_options(
     try:
         if data.options:
             inference_service.update_engine_options(data.options)
-        if data.max_new_tokens is not None:
-            return inference_service.update_generation_settings(data.max_new_tokens)
+        if data.max_new_tokens is not None or data.temperature is not None:
+            return inference_service.update_generation_settings(
+                max_new_tokens=data.max_new_tokens,
+                temperature=data.temperature,
+            )
         return inference_service.engine_options_status()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

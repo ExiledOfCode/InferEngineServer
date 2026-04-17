@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     INFERENCE_TOKENIZER_PATH: str = ""
     # 可选：默认模型 ID。配合 INFERENCE_MODELS_JSON 使用。
     INFERENCE_DEFAULT_MODEL_ID: str = "qwen2_5_1_5b_instruct"
+    # 可选：默认 temperature。0 表示贪心解码，>0 时启用 GPU 概率采样。
+    INFERENCE_TEMPERATURE: float = 0.0
     # 可选：运行时优化开关持久化文件。相对路径按 backend 目录解析。
     INFERENCE_RUNTIME_OPTIONS_PATH: str = "runtime/inference_options.json"
     # 可选：引擎优化项默认配置。支持后续继续扩展新选项。

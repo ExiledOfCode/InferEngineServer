@@ -183,6 +183,10 @@ export const chatApi = {
     `/conversations/${id}/messages`,
     { content, think_enabled: thinkEnabled }
   ),
+  updateMessageFeedback: (messageId, feedback) => api.put(
+    `/messages/${messageId}/feedback`,
+    { feedback }
+  ),
   cancelInference: () => api.post('/inference/cancel'),
   getInferenceStatus: () => api.get('/inference/status'),
   getInferenceTrace: () => api.get('/inference/trace'),

@@ -9,12 +9,32 @@ from ..models.user import User
 from ..models.conversation import Conversation
 from ..models.message import Message
 from ..schemas.conversation import ConversationCreate, ConversationResponse, ConversationUpdate
-from ..schemas.message import MessageCreate, MessageResponse, MessageWithTraceResponse
+from ..schemas.message import MessageCreate, MessageFeedbackUpdate, MessageResponse, MessageWithTraceResponse
 from ..schemas.inference import InferenceModelSelectRequest
 from ..utils.security import get_current_chat_user
 from ..services.inference_service import InferenceCancelledError, inference_service
 
 router = APIRouter()
+
+
+def build_message_response(message: Message, trace_payload=None) -> MessageResponse:
+    if trace_payload is None and message.inference_trace:
+        try:
+            trace_payload = json.loads(message.inference_trace)
+        except Exception:
+            trace_payload = None
+    feedback = message.feedback if message.feedback in ("like", "dislike") else None
+    return MessageResponse(
+        id=message.id,
+        conversation_id=message.conversation_id,
+        role=message.role,
+        content=message.content,
+        reasoning_content=message.reasoning_content,
+        raw_content=message.raw_content,
+        inference_trace=trace_payload,
+        feedback=feedback,
+        created_at=message.created_at,
+    )
 
 @router.get("/inference/status")
 def get_inference_status(current_user: User = Depends(get_current_chat_user)):
@@ -145,27 +165,32 @@ def get_messages(
         Message.conversation_id == conversation_id
     ).order_by(Message.created_at.asc()).all()
     
-    results: List[MessageResponse] = []
-    for msg in messages:
-        trace_payload = None
-        if msg.inference_trace:
-            try:
-                trace_payload = json.loads(msg.inference_trace)
-            except Exception:
-                trace_payload = None
-        results.append(
-            MessageResponse(
-                id=msg.id,
-                conversation_id=msg.conversation_id,
-                role=msg.role,
-                content=msg.content,
-                reasoning_content=msg.reasoning_content,
-                raw_content=msg.raw_content,
-                inference_trace=trace_payload,
-                created_at=msg.created_at,
-            )
-        )
-    return results
+    return [build_message_response(msg) for msg in messages]
+
+
+@router.put("/messages/{message_id}/feedback", response_model=MessageResponse)
+def update_message_feedback(
+    message_id: int,
+    data: MessageFeedbackUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_chat_user),
+):
+    """标记消息点赞/点踩。再次点击同类标记时前端会传空值取消。"""
+    message = db.query(Message).join(
+        Conversation,
+        Message.conversation_id == Conversation.id,
+    ).filter(
+        Message.id == message_id,
+        Conversation.user_id == current_user.id,
+    ).first()
+
+    if not message:
+        raise HTTPException(status_code=404, detail="消息不存在")
+
+    message.feedback = data.feedback
+    db.commit()
+    db.refresh(message)
+    return build_message_response(message)
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageWithTraceResponse)
 def send_message(
@@ -240,13 +265,4 @@ def send_message(
     db.commit()
     db.refresh(assistant_message)
     
-    return MessageWithTraceResponse(
-        id=assistant_message.id,
-        conversation_id=assistant_message.conversation_id,
-        role=assistant_message.role,
-        content=assistant_message.content,
-        reasoning_content=assistant_message.reasoning_content,
-        raw_content=assistant_message.raw_content,
-        created_at=assistant_message.created_at,
-        inference_trace=trace_payload,
-    )
+    return MessageWithTraceResponse(**build_message_response(assistant_message, trace_payload).model_dump())

@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { chatApi } from '../api'
 import { ElMessage } from 'element-plus'
 
-const CHAT_STATUS_POLL_INTERVAL_MS = 2000
+const CHAT_STATUS_POLL_INTERVAL_MS = 500
 const PINNED_CONVERSATIONS_KEY = 'chat:pinned-conversations'
 
 function collapseRepeatedLines(content) {
@@ -101,6 +101,10 @@ function normalizeMessages(messages) {
     }
     return msg
   })
+}
+
+function normalizeFeedback(value) {
+  return value === 'like' || value === 'dislike' ? value : null
 }
 
 function pickLatestStoredTrace(messages) {
@@ -349,6 +353,17 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function updateMessageFeedback(messageId, feedback) {
+    const nextFeedback = normalizeFeedback(feedback)
+    const updated = await chatApi.updateMessageFeedback(messageId, nextFeedback)
+    messages.value = messages.value.map(message => (
+      message.id === messageId
+        ? { ...message, feedback: normalizeFeedback(updated?.feedback) }
+        : message
+    ))
+    return updated
+  }
+
   async function sendMessage(content, thinkEnabled = true) {
     if (!currentConversation.value) {
       await createConversation()
@@ -357,8 +372,10 @@ export const useChatStore = defineStore('chat', () => {
     const convId = currentConversation.value.id
     const tempUserMessage = {
       id: Date.now(),
+      conversation_id: convId,
       role: 'user',
       content,
+      pending: true,
       created_at: new Date().toISOString()
     }
     messages.value.push(tempUserMessage)
@@ -493,6 +510,7 @@ export const useChatStore = defineStore('chat', () => {
     fetchInferenceTrace,
     switchInferenceModel,
     cancelGeneration,
+    updateMessageFeedback,
     sendMessage
   }
 })

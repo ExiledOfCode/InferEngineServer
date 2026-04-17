@@ -1,10 +1,11 @@
 {
-  "updated_at": 1776349718.0160153,
+  "updated_at": 1776402178.2825985,
   "options": {
     "trace_enabled": false,
     "warmup_on_model_switch": true
   },
   "settings": {
-    "max_new_tokens": 1024
+    "max_new_tokens": 2048,
+    "temperature": 0.1
   }
 }

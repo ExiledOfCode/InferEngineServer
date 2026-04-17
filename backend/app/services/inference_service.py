@@ -22,6 +22,8 @@ class InferenceService:
     THINK_NO_ANSWER_FALLBACK = "（当前 max_token 已耗尽，仅生成了思考过程，请提高 max_token 后重试。）"
     MIN_MAX_NEW_TOKENS = 16
     MAX_MAX_NEW_TOKENS = 2048
+    MIN_TEMPERATURE = 0.0
+    MAX_TEMPERATURE = 2.0
 
     DEFAULT_ENGINE_OPTIONS: List[Dict[str, Any]] = [
         {
@@ -76,6 +78,8 @@ class InferenceService:
         default_max_new_tokens = legacy_max_steps if legacy_max_steps is not None else 128
         self.default_max_new_tokens = self._read_positive_int("INFERENCE_MAX_NEW_TOKENS", default_max_new_tokens)
         self.max_new_tokens = self.default_max_new_tokens
+        self.default_temperature = self._read_float("INFERENCE_TEMPERATURE", 0.0)
+        self.temperature = self.default_temperature
 
         self.timeout_seconds = self._read_positive_int("INFERENCE_TIMEOUT_SECONDS", 180)
         self.startup_timeout_seconds = self._read_positive_int("INFERENCE_STARTUP_TIMEOUT_SECONDS", 900)
@@ -102,10 +106,12 @@ class InferenceService:
         self.engine_option_catalog = self._load_engine_option_catalog()
         self.engine_option_values = self._load_engine_option_values(self.runtime_state_payload)
         self.runtime_max_new_tokens = self._load_runtime_max_new_tokens(self.runtime_state_payload)
+        self.runtime_temperature = self._load_runtime_temperature(self.runtime_state_payload)
         self.trace_enabled = True
         self.warmup_on_model_switch = True
         self._apply_engine_options(initializing=True)
         self.max_new_tokens = self._resolved_max_new_tokens(None)
+        self.temperature = self._resolved_temperature(None)
 
         if self.max_new_tokens < 8:
             print(f"[WARN] INFERENCE_MAX_NEW_TOKENS={self.max_new_tokens} 偏小，可能导致回复很短。")
@@ -145,6 +151,17 @@ class InferenceService:
             return default
         return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
+    @classmethod
+    def _read_float(cls, env_name: str, default: float) -> float:
+        raw = os.getenv(env_name)
+        if raw is None:
+            return cls._clamp_temperature(default)
+        try:
+            value = float(raw)
+        except ValueError:
+            return cls._clamp_temperature(default)
+        return cls._clamp_temperature(value)
+
     @staticmethod
     def _read_prompt_format(env_name: str, default: str) -> str:
         raw = str(os.getenv(env_name, default)).strip().lower()
@@ -170,6 +187,16 @@ class InferenceService:
         if text in {"0", "false", "no", "off"}:
             return False
         return default
+
+    @classmethod
+    def _clamp_temperature(cls, value: Any, default: float = 0.0) -> float:
+        try:
+            parsed = float(value)
+        except Exception:
+            parsed = default
+        if parsed != parsed:
+            parsed = default
+        return max(cls.MIN_TEMPERATURE, min(cls.MAX_TEMPERATURE, parsed))
 
     @staticmethod
     def _normalize_model_id(value: str) -> str:
@@ -308,10 +335,26 @@ class InferenceService:
             return None
         return self._clamp_max_new_tokens(raw_value, self.default_max_new_tokens)
 
+    def _load_runtime_temperature(self, payload: Optional[Dict[str, Any]] = None) -> Optional[float]:
+        payload = payload or {}
+        raw_settings = payload.get("settings") if isinstance(payload, dict) else None
+        if not isinstance(raw_settings, dict):
+            return None
+        raw_value = raw_settings.get("temperature")
+        if raw_value is None:
+            return None
+        return self._clamp_temperature(raw_value, self.default_temperature)
+
     def _resolved_max_new_tokens(self, model_value: Any) -> int:
         base_value = self._clamp_max_new_tokens(model_value, self.default_max_new_tokens)
         if self.runtime_max_new_tokens is not None:
             return self._clamp_max_new_tokens(self.runtime_max_new_tokens, base_value)
+        return base_value
+
+    def _resolved_temperature(self, model_value: Any) -> float:
+        base_value = self._clamp_temperature(model_value, self.default_temperature)
+        if self.runtime_temperature is not None:
+            return self._clamp_temperature(self.runtime_temperature, base_value)
         return base_value
 
     def _persist_engine_option_values(self):
@@ -330,6 +373,7 @@ class InferenceService:
             },
             "settings": {
                 "max_new_tokens": self.max_new_tokens,
+                "temperature": self.temperature,
             },
         }
         with open(path, "w", encoding="utf-8") as fh:
@@ -347,7 +391,9 @@ class InferenceService:
         self.warmup_on_model_switch = self._engine_option_enabled("warmup_on_model_switch")
         current_entry = next((item for item in self.available_models if item.get("id") == self.current_model_id), None)
         model_max_new_tokens = current_entry.get("max_new_tokens") if current_entry else None
+        model_temperature = current_entry.get("temperature") if current_entry else None
         self.max_new_tokens = self._resolved_max_new_tokens(model_max_new_tokens)
+        self.temperature = self._resolved_temperature(model_temperature)
 
         with self.trace_lock:
             if not self.trace_enabled:
@@ -397,6 +443,10 @@ class InferenceService:
             "default_max_new_tokens": self.default_max_new_tokens,
             "min_max_new_tokens": self.MIN_MAX_NEW_TOKENS,
             "max_max_new_tokens": self.MAX_MAX_NEW_TOKENS,
+            "temperature": self.temperature,
+            "default_temperature": self.default_temperature,
+            "min_temperature": self.MIN_TEMPERATURE,
+            "max_temperature": self.MAX_TEMPERATURE,
             "runtime_options_path": self.runtime_options_path,
             "options": self.list_engine_options(),
         }
@@ -429,20 +479,34 @@ class InferenceService:
         self._apply_engine_options(restart_running=restart_required)
         return self.engine_options_status()
 
-    def update_generation_settings(self, max_new_tokens: Optional[int] = None) -> Dict[str, Any]:
-        if max_new_tokens is None:
+    def update_generation_settings(
+        self,
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        if max_new_tokens is None and temperature is None:
             return self.engine_options_status()
 
         with self.request_state_lock:
             if self.active_request_id is not None:
-                raise RuntimeError("当前有进行中的推理，请等待完成后再调整 max_token。")
+                raise RuntimeError("当前有进行中的推理，请等待完成后再调整生成参数。")
 
-        next_value = self._clamp_max_new_tokens(max_new_tokens, self.default_max_new_tokens)
-        current_value = self.max_new_tokens
-        self.runtime_max_new_tokens = next_value
-        self.max_new_tokens = next_value
+        restart_required = False
+        if max_new_tokens is not None:
+            next_value = self._clamp_max_new_tokens(max_new_tokens, self.default_max_new_tokens)
+            current_value = self.max_new_tokens
+            self.runtime_max_new_tokens = next_value
+            self.max_new_tokens = next_value
+            restart_required = restart_required or next_value != current_value
+        if temperature is not None:
+            next_temperature = self._clamp_temperature(temperature, self.default_temperature)
+            current_temperature = self.temperature
+            self.runtime_temperature = next_temperature
+            self.temperature = next_temperature
+            restart_required = restart_required or next_temperature != current_temperature
+
         self._persist_engine_option_values()
-        self._apply_engine_options(restart_running=(next_value != current_value))
+        self._apply_engine_options(restart_running=restart_required)
         return self.engine_options_status()
 
     @staticmethod
@@ -1201,6 +1265,7 @@ class InferenceService:
             "system_prompt": str(raw_entry.get("system_prompt") or "").strip() or None,
             "raw_with_history": raw_entry.get("raw_with_history"),
             "max_new_tokens": raw_entry.get("max_new_tokens"),
+            "temperature": raw_entry.get("temperature"),
         }
 
     def _deduplicate_model_ids(self, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1351,6 +1416,7 @@ class InferenceService:
                     "system_prompt": None,
                     "raw_with_history": None,
                     "max_new_tokens": None,
+                    "temperature": None,
                 }
             else:
                 resolved_entry = self._resolve_model_entry(raw_entry, "config")
@@ -1395,6 +1461,7 @@ class InferenceService:
         self.current_model_family = None
         self.current_model_dir = None
         self.max_new_tokens = self._resolved_max_new_tokens(None)
+        self.temperature = self._resolved_temperature(None)
         self.prompt_format = self.default_prompt_format
         self.raw_with_history = self.default_raw_with_history
         self.system_prompt = self.default_system_prompt
@@ -1411,6 +1478,7 @@ class InferenceService:
         self.current_model_dir = entry.get("dir")
 
         self.max_new_tokens = self._resolved_max_new_tokens(entry.get("max_new_tokens"))
+        self.temperature = self._resolved_temperature(entry.get("temperature"))
         prompt_format = str(entry.get("prompt_format") or self.default_prompt_format).strip().lower()
         self.prompt_format = prompt_format if prompt_format in {"raw", "chatml", "auto"} else self.default_prompt_format
         self.raw_with_history = self._coerce_bool(entry.get("raw_with_history"), self.default_raw_with_history)
@@ -1506,6 +1574,7 @@ class InferenceService:
                     self.model_path,
                     self.tokenizer_path,
                     str(self.max_new_tokens),
+                    f"{self.temperature:.6f}",
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -1596,6 +1665,7 @@ class InferenceService:
         print(f"  模型: {os.path.basename(self.model_path)}")
         print(f"  分词器: {os.path.basename(self.tokenizer_path)}")
         print(f"  max_new_tokens: {self.max_new_tokens}")
+        print(f"  temperature: {self.temperature:.3f}")
         print(f"  prompt_format: {self.prompt_format} (effective={self._effective_prompt_format()})")
         print(f"  system_prompt: {self.system_prompt}")
         print(f"  raw_with_history: {self.raw_with_history}")
@@ -1687,6 +1757,7 @@ class InferenceService:
         print(
             f"[Inference][{req_id}] start: model={self.current_model_id} history={len(safe_history)} "
             f"prompt_chars={len(model_prompt)} max_new_tokens={self.max_new_tokens} "
+            f"temperature={self.temperature:.3f} "
             f"prompt_format={effective_prompt_format} think_enabled={bool(think_enabled)}"
         )
         self._init_trace(
@@ -1930,6 +2001,7 @@ class InferenceService:
                         self.tokenizer_path,
                         model_prompt,
                         str(self.max_new_tokens),
+                        f"{self.temperature:.6f}",
                     ],
                     cwd=self.engine_path,
                     capture_output=True,
@@ -2064,6 +2136,7 @@ class InferenceService:
             "trace_enabled": self.trace_enabled,
             "warmup_on_model_switch": self.warmup_on_model_switch,
             "max_new_tokens": self.max_new_tokens,
+            "temperature": self.temperature,
             "prompt_format": self.prompt_format,
             "effective_prompt_format": self._effective_prompt_format(),
             "system_prompt": self.system_prompt,

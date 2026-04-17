@@ -139,6 +139,35 @@
             </div>
           </div>
 
+          <div class="setting-item">
+            <div class="option-meta">
+              <div class="option-title-row">
+                <span class="option-title">temperature</span>
+                <span class="option-tag">0 为确定性输出</span>
+              </div>
+              <p class="option-desc">
+                当前值 {{ inferenceOptions.temperature }}，调高后会按概率采样生成 token。
+              </p>
+            </div>
+            <div class="token-editor">
+              <el-input-number
+                v-model="draftTemperature"
+                :min="inferenceOptions.min_temperature ?? 0"
+                :max="inferenceOptions.max_temperature ?? 2"
+                :step="0.1"
+                :precision="2"
+                controls-position="right"
+              />
+              <el-button
+                type="primary"
+                :loading="savingTemperature"
+                @click="handleTemperatureSave"
+              >
+                应用
+              </el-button>
+            </div>
+          </div>
+
           <div class="option-list">
             <article
               v-for="option in inferenceOptions.options"
@@ -190,12 +219,18 @@ const inferenceOptions = ref({
   default_max_new_tokens: 128,
   min_max_new_tokens: 16,
   max_max_new_tokens: 2048,
+  temperature: 0,
+  default_temperature: 0,
+  min_temperature: 0,
+  max_temperature: 2,
   runtime_options_path: '',
   options: []
 })
 const savingOptionIds = ref([])
 const draftMaxNewTokens = ref(128)
 const savingMaxNewTokens = ref(false)
+const draftTemperature = ref(0)
+const savingTemperature = ref(false)
 
 const currentModelName = computed(() => inferenceOptions.value.current_model_name || '未选择模型')
 
@@ -215,6 +250,7 @@ async function fetchInferenceOptions() {
   try {
     inferenceOptions.value = await adminApi.getInferenceOptions()
     draftMaxNewTokens.value = Number(inferenceOptions.value.max_new_tokens || 128)
+    draftTemperature.value = Number(inferenceOptions.value.temperature ?? 0)
   } catch (e) {
     ElMessage.error(e?.detail || '加载引擎优化配置失败')
   }
@@ -234,6 +270,7 @@ async function handleOptionChange(option, enabled) {
       }
     })
     draftMaxNewTokens.value = Number(inferenceOptions.value.max_new_tokens || draftMaxNewTokens.value)
+    draftTemperature.value = Number(inferenceOptions.value.temperature ?? draftTemperature.value)
     ElMessage.success(`${option.name}已${enabled ? '开启' : '关闭'}`)
   } catch (e) {
     option.enabled = previous
@@ -262,12 +299,41 @@ async function handleMaxNewTokensSave() {
       max_new_tokens: nextValue
     })
     draftMaxNewTokens.value = Number(inferenceOptions.value.max_new_tokens || nextValue)
+    draftTemperature.value = Number(inferenceOptions.value.temperature ?? draftTemperature.value)
     ElMessage.success(`max_token 已更新为 ${inferenceOptions.value.max_new_tokens}`)
   } catch (e) {
     draftMaxNewTokens.value = Number(inferenceOptions.value.max_new_tokens || currentValue || 128)
     ElMessage.error(e?.detail || '更新 max_token 失败')
   } finally {
     savingMaxNewTokens.value = false
+  }
+}
+
+async function handleTemperatureSave() {
+  const nextValue = Number(draftTemperature.value || 0)
+  if (!Number.isFinite(nextValue)) {
+    ElMessage.error('temperature 必须是数字')
+    return
+  }
+
+  const currentValue = Number(inferenceOptions.value.temperature ?? 0)
+  if (nextValue === currentValue) {
+    return
+  }
+
+  savingTemperature.value = true
+  try {
+    inferenceOptions.value = await adminApi.updateInferenceOptions({
+      temperature: nextValue
+    })
+    draftTemperature.value = Number(inferenceOptions.value.temperature ?? nextValue)
+    draftMaxNewTokens.value = Number(inferenceOptions.value.max_new_tokens || draftMaxNewTokens.value)
+    ElMessage.success(`temperature 已更新为 ${inferenceOptions.value.temperature}`)
+  } catch (e) {
+    draftTemperature.value = Number(inferenceOptions.value.temperature ?? currentValue ?? 0)
+    ElMessage.error(e?.detail || '更新 temperature 失败')
+  } finally {
+    savingTemperature.value = false
   }
 }
 
