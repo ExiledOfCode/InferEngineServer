@@ -21,7 +21,7 @@ class InferenceService:
     THINK_CLOSE_TAG = "</think>"
     THINK_NO_ANSWER_FALLBACK = "（当前 max_token 已耗尽，仅生成了思考过程，请提高 max_token 后重试。）"
     MIN_MAX_NEW_TOKENS = 16
-    MAX_MAX_NEW_TOKENS = 2048
+    MAX_MAX_NEW_TOKENS = None
     MIN_TEMPERATURE = 0.0
     MAX_TEMPERATURE = 2.0
 
@@ -305,7 +305,7 @@ class InferenceService:
     @classmethod
     def _clamp_max_new_tokens(cls, value: Any, default: int) -> int:
         parsed = cls._coerce_positive_int(value, default)
-        return max(cls.MIN_MAX_NEW_TOKENS, min(cls.MAX_MAX_NEW_TOKENS, parsed))
+        return max(cls.MIN_MAX_NEW_TOKENS, parsed)
 
     def _load_engine_option_values(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
         values = {

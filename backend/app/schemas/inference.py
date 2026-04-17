@@ -28,7 +28,7 @@ class InferenceEngineOptionsResponse(BaseModel):
     max_new_tokens: int = 128
     default_max_new_tokens: int = 128
     min_max_new_tokens: int = 16
-    max_max_new_tokens: int = 2048
+    max_max_new_tokens: Optional[int] = None
     temperature: float = 0.0
     default_temperature: float = 0.0
     min_temperature: float = 0.0

@@ -125,7 +125,6 @@
               <el-input-number
                 v-model="draftMaxNewTokens"
                 :min="inferenceOptions.min_max_new_tokens || 16"
-                :max="inferenceOptions.max_max_new_tokens || 2048"
                 :step="16"
                 controls-position="right"
               />
@@ -218,7 +217,7 @@ const inferenceOptions = ref({
   max_new_tokens: 128,
   default_max_new_tokens: 128,
   min_max_new_tokens: 16,
-  max_max_new_tokens: 2048,
+  max_max_new_tokens: null,
   temperature: 0,
   default_temperature: 0,
   min_temperature: 0,
