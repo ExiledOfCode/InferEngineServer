@@ -21,6 +21,7 @@ class InferenceEngineOptionsResponse(BaseModel):
     current_model_id: Optional[str] = None
     current_model_name: Optional[str] = None
     current_model_family: Optional[str] = None
+    current_model_seq_len: Optional[int] = None
     running: bool = False
     ready: bool = False
     trace_enabled: bool = True

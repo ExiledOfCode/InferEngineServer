@@ -1,7 +1,7 @@
 {
-  "updated_at": 1776416652.7610722,
+  "updated_at": 1776432082.3745532,
   "options": {
-    "trace_enabled": false,
+    "trace_enabled": true,
     "warmup_on_model_switch": true
   },
   "settings": {

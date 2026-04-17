@@ -87,6 +87,9 @@
           <h1>自研推理引擎对话平台</h1>
           <div class="current-model-line">
             <span class="current-model-name">{{ currentModelName || '未选择模型' }}</span>
+            <span v-if="currentModelSeqLenText" class="current-model-context">
+              上下文 {{ currentModelSeqLenText }}
+            </span>
             <div v-if="modelLoadingVisible" class="model-loading-inline">
               <div class="model-loading-inline-bar">
                 <el-progress
@@ -122,7 +125,7 @@
                 <div class="model-option">
                   <span>{{ model.name }}</span>
                   <span class="model-option-meta">
-                    {{ model.family || 'model' }}{{ model.ready ? '' : ' · 未就绪' }}
+                    {{ model.family || 'model' }}{{ formatModelSeqLen(model.seq_len) }}{{ model.ready ? '' : ' · 未就绪' }}
                   </span>
                 </div>
               </el-option>
@@ -520,6 +523,8 @@ let statusTimer = null
 const availableModels = computed(() => (Array.isArray(chatStore.inferenceStatus?.available_models) ? chatStore.inferenceStatus.available_models : []))
 const currentModelName = computed(() => chatStore.inferenceStatus?.current_model_name || '')
 const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.current_model_family || '').toLowerCase())
+const currentModelSeqLen = computed(() => Number(chatStore.inferenceStatus?.current_model_seq_len || 0))
+const currentModelSeqLenText = computed(() => formatModelSeqLen(currentModelSeqLen.value).replace(/^ · /, ''))
 const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
 const modelLoadingProgress = computed(() => chatStore.inferenceStatus?.model_loading_progress || null)
 const modelLoadingState = computed(() => String(modelLoadingProgress.value?.state || '').toLowerCase())
@@ -968,6 +973,14 @@ function handleMessageClick(message) {
       traceSidebarCollapsed.value = false
     }
   }
+}
+
+function formatModelSeqLen(value) {
+  const numeric = Number(value || 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return ''
+  }
+  return ` · ${Math.round(numeric).toLocaleString()} tokens`
 }
 
 function handleLogout() {
@@ -1448,6 +1461,12 @@ function handleLogout() {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.current-model-context {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .model-loading-inline {

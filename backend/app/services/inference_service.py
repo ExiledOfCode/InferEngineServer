@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import struct
 import subprocess
 import threading
 import time
@@ -22,6 +23,7 @@ class InferenceService:
     THINK_NO_ANSWER_FALLBACK = "（当前 max_token 已耗尽，仅生成了思考过程，请提高 max_token 后重试。）"
     MIN_MAX_NEW_TOKENS = 16
     MAX_MAX_NEW_TOKENS = None
+    MODEL_FILE_MAGIC = 0x4B4D444C
     MIN_TEMPERATURE = 0.0
     MAX_TEMPERATURE = 2.0
 
@@ -55,6 +57,7 @@ class InferenceService:
         self.current_model_name: Optional[str] = None
         self.current_model_family: Optional[str] = None
         self.current_model_dir: Optional[str] = None
+        self.current_model_seq_len: Optional[int] = None
         self.available_models: List[Dict[str, Any]] = []
 
         self.process: Optional[subprocess.Popen] = None
@@ -435,6 +438,7 @@ class InferenceService:
             "current_model_id": self.current_model_id,
             "current_model_name": self.current_model_name,
             "current_model_family": self.current_model_family,
+            "current_model_seq_len": self.current_model_seq_len,
             "running": self.is_running(),
             "ready": self.is_ready(),
             "trace_enabled": self.trace_enabled,
@@ -1160,6 +1164,35 @@ class InferenceService:
 
         return model_file, tokenizer_file, tokenizer_type
 
+    @classmethod
+    def _read_model_seq_len(cls, model_path: Optional[str]) -> Optional[int]:
+        if not model_path or not str(model_path).lower().endswith(".bin"):
+            return None
+        try:
+            with open(model_path, "rb") as fh:
+                header = fh.read(64)
+        except Exception as exc:
+            print(f"[Inference] 读取模型 seq_len 失败: {model_path}: {exc}")
+            return None
+
+        if len(header) < 28:
+            return None
+
+        try:
+            magic = struct.unpack_from("<I", header, 0)[0]
+            config_offset = 16 if magic == cls.MODEL_FILE_MAGIC else 0
+            if len(header) < config_offset + 28:
+                return None
+            seq_len = struct.unpack_from("<iiiiiii", header, config_offset)[6]
+        except Exception as exc:
+            print(f"[Inference] 解析模型 seq_len 失败: {model_path}: {exc}")
+            return None
+
+        if seq_len <= 0 or seq_len > 1_000_000:
+            print(f"[Inference] 模型 seq_len 异常: {model_path}: {seq_len}")
+            return None
+        return seq_len
+
     @staticmethod
     def _infer_model_family(*hints: Any) -> str:
         text = " ".join(str(item or "") for item in hints).lower()
@@ -1266,6 +1299,7 @@ class InferenceService:
             "raw_with_history": raw_entry.get("raw_with_history"),
             "max_new_tokens": raw_entry.get("max_new_tokens"),
             "temperature": raw_entry.get("temperature"),
+            "seq_len": self._read_model_seq_len(model_path),
         }
 
     def _deduplicate_model_ids(self, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1417,6 +1451,7 @@ class InferenceService:
                     "raw_with_history": None,
                     "max_new_tokens": None,
                     "temperature": None,
+                    "seq_len": self._read_model_seq_len(raw_entry.get("model")),
                 }
             else:
                 resolved_entry = self._resolve_model_entry(raw_entry, "config")
@@ -1447,7 +1482,8 @@ class InferenceService:
             marker = "*" if item["id"] == self.current_model_id else " "
             print(
                 f"{marker} {item['id']} | {item['name']} | family={item['family']} | "
-                f"model={item['model']} | exe={item.get('executable') or '(none)'}"
+                f"seq_len={item.get('seq_len') or '-'} | model={item['model']} | "
+                f"exe={item.get('executable') or '(none)'}"
             )
 
     def _clear_selected_model(self):
@@ -1460,6 +1496,7 @@ class InferenceService:
         self.current_model_name = None
         self.current_model_family = None
         self.current_model_dir = None
+        self.current_model_seq_len = None
         self.max_new_tokens = self._resolved_max_new_tokens(None)
         self.temperature = self._resolved_temperature(None)
         self.prompt_format = self.default_prompt_format
@@ -1476,6 +1513,7 @@ class InferenceService:
         self.current_model_name = entry.get("name")
         self.current_model_family = entry.get("family")
         self.current_model_dir = entry.get("dir")
+        self.current_model_seq_len = entry.get("seq_len")
 
         self.max_new_tokens = self._resolved_max_new_tokens(entry.get("max_new_tokens"))
         self.temperature = self._resolved_temperature(entry.get("temperature"))
@@ -1513,6 +1551,7 @@ class InferenceService:
             "model_path": entry.get("model"),
             "tokenizer_path": entry.get("tokenizer"),
             "tokenizer_type": entry.get("tokenizer_type"),
+            "seq_len": entry.get("seq_len"),
             "executable": executable,
             "ready": ready,
             "selected": entry.get("id") == self.current_model_id,
@@ -2122,6 +2161,7 @@ class InferenceService:
             "current_model_name": self.current_model_name,
             "current_model_family": self.current_model_family,
             "current_model_dir": self.current_model_dir,
+            "current_model_seq_len": self.current_model_seq_len,
             "model_path": self.model_path,
             "tokenizer_path": self.tokenizer_path,
             "tokenizer_type": self.tokenizer_type,

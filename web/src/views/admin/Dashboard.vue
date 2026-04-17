@@ -93,6 +93,10 @@
               <div class="summary-value">{{ currentModelName }}</div>
             </article>
             <article class="summary-card">
+              <div class="summary-label">上下文长度</div>
+              <div class="summary-value">{{ currentModelSeqLenText }}</div>
+            </article>
+            <article class="summary-card">
               <div class="summary-label">引擎状态</div>
               <div class="summary-value">
                 <span class="status-pill" :class="{ online: inferenceOptions.running }">
@@ -118,7 +122,8 @@
                 <span class="option-tag">影响 think 长度与最终回答完整度</span>
               </div>
               <p class="option-desc">
-                当前值 {{ inferenceOptions.max_new_tokens }}，可在这里直接调整生成步数上限。
+                当前值 {{ inferenceOptions.max_new_tokens }}。当前模型上下文长度为 {{ currentModelSeqLenText }}，
+                实际安全条件是 prompt token + max_token 不超过上下文长度。
               </p>
             </div>
             <div class="token-editor">
@@ -210,6 +215,7 @@ const authStore = useAuthStore()
 const stats = ref({ user_count: 0, conversation_count: 0, message_count: 0 })
 const inferenceOptions = ref({
   current_model_name: '',
+  current_model_seq_len: null,
   running: false,
   ready: false,
   trace_enabled: true,
@@ -232,6 +238,18 @@ const draftTemperature = ref(0)
 const savingTemperature = ref(false)
 
 const currentModelName = computed(() => inferenceOptions.value.current_model_name || '未选择模型')
+const currentModelSeqLen = computed(() => Number(inferenceOptions.value.current_model_seq_len || 0))
+const currentModelSeqLenText = computed(() => (
+  currentModelSeqLen.value > 0 ? `${formatTokenCount(currentModelSeqLen.value)} tokens` : '未知'
+))
+
+function formatTokenCount(value) {
+  const numeric = Number(value || 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '未知'
+  }
+  return Math.round(numeric).toLocaleString()
+}
 
 onMounted(async () => {
   await Promise.all([fetchStats(), fetchInferenceOptions()])
@@ -602,7 +620,7 @@ function handleLogout() {
 .engine-summary {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
