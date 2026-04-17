@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from typing import List
 import time
 import json
+from datetime import datetime
 from ..database import get_db
 from ..models.user import User
 from ..models.conversation import Conversation
 from ..models.message import Message
-from ..schemas.conversation import ConversationCreate, ConversationResponse
+from ..schemas.conversation import ConversationCreate, ConversationResponse, ConversationUpdate
 from ..schemas.message import MessageCreate, MessageResponse, MessageWithTraceResponse
 from ..schemas.inference import InferenceModelSelectRequest
 from ..utils.security import get_current_chat_user
@@ -76,6 +77,32 @@ def create_conversation(
         title=data.title or "新对话"
     )
     db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+@router.put("/conversations/{conversation_id}", response_model=ConversationResponse)
+def update_conversation(
+    conversation_id: int,
+    data: ConversationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_chat_user)
+):
+    """更新对话信息"""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    title = (data.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="对话名称不能为空")
+
+    conversation.title = title[:255]
+    conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(conversation)
     return conversation

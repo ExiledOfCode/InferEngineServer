@@ -3,6 +3,9 @@ import { ref } from 'vue'
 import { chatApi } from '../api'
 import { ElMessage } from 'element-plus'
 
+const CHAT_STATUS_POLL_INTERVAL_MS = 2000
+const PINNED_CONVERSATIONS_KEY = 'chat:pinned-conversations'
+
 function collapseRepeatedLines(content) {
   const lines = String(content || '').split('\n')
   if (lines.length <= 1) {
@@ -111,8 +114,27 @@ function pickLatestStoredTrace(messages) {
   return null
 }
 
+function readPinnedConversationIds() {
+  try {
+    const raw = localStorage.getItem(PINNED_CONVERSATIONS_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.map(id => String(id)).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+function persistPinnedConversationIds(ids) {
+  try {
+    localStorage.setItem(PINNED_CONVERSATIONS_KEY, JSON.stringify(ids))
+  } catch {
+    // ignore persistence failures
+  }
+}
+
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref([])
+  const pinnedConversationIds = ref(readPinnedConversationIds())
   const currentConversation = ref(null)
   const messages = ref([])
   const loading = ref(false)
@@ -127,8 +149,41 @@ export const useChatStore = defineStore('chat', () => {
     return inferenceStatus.value?.trace_enabled !== false
   }
 
+  function isModelLoadingStatus() {
+    const state = String(inferenceStatus.value?.model_loading_progress?.state || '').toLowerCase()
+    return state === 'starting' || state === 'loading'
+  }
+
+  function isConversationPinned(id) {
+    return pinnedConversationIds.value.includes(String(id))
+  }
+
+  function orderConversations(items) {
+    const pinnedIndex = new Map(pinnedConversationIds.value.map((id, index) => [String(id), index]))
+    return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
+      const aPinned = pinnedIndex.has(String(a?.id))
+      const bPinned = pinnedIndex.has(String(b?.id))
+      if (aPinned && bPinned) {
+        return pinnedIndex.get(String(a.id)) - pinnedIndex.get(String(b.id))
+      }
+      if (aPinned) return -1
+      if (bPinned) return 1
+      return 0
+    })
+  }
+
+  function setConversations(items) {
+    const existingIds = new Set((Array.isArray(items) ? items : []).map(item => String(item?.id)))
+    const nextPinned = pinnedConversationIds.value.filter(id => existingIds.has(String(id)))
+    if (nextPinned.length !== pinnedConversationIds.value.length) {
+      pinnedConversationIds.value = nextPinned
+      persistPinnedConversationIds(nextPinned)
+    }
+    conversations.value = orderConversations(items)
+  }
+
   async function fetchConversations() {
-    conversations.value = await chatApi.getConversations()
+    setConversations(await chatApi.getConversations())
   }
 
   async function createConversation() {
@@ -151,7 +206,7 @@ export const useChatStore = defineStore('chat', () => {
     creatingConversation.value = true
     try {
       const conv = await chatApi.createConversation({ title: '新对话' })
-      conversations.value.unshift(conv)
+      conversations.value = orderConversations([conv, ...conversations.value])
       await selectConversation(conv.id)
       return conv
     } finally {
@@ -161,12 +216,46 @@ export const useChatStore = defineStore('chat', () => {
 
   async function deleteConversation(id) {
     await chatApi.deleteConversation(id)
+    pinnedConversationIds.value = pinnedConversationIds.value.filter(item => item !== String(id))
+    persistPinnedConversationIds(pinnedConversationIds.value)
     conversations.value = conversations.value.filter(c => c.id !== id)
     if (currentConversation.value?.id === id) {
       currentConversation.value = null
       messages.value = []
       inferenceTrace.value = null
     }
+  }
+
+  async function renameConversation(id, title) {
+    const nextTitle = String(title || '').trim()
+    if (!nextTitle) {
+      return null
+    }
+
+    const updated = await chatApi.updateConversation(id, { title: nextTitle })
+    conversations.value = orderConversations(
+      conversations.value.map(conv => (conv.id === id ? { ...conv, ...updated } : conv))
+    )
+    if (currentConversation.value?.id === id) {
+      currentConversation.value = { ...currentConversation.value, ...updated }
+    }
+    return updated
+  }
+
+  function togglePinConversation(id) {
+    const key = String(id)
+    if (!key) {
+      return false
+    }
+    const next = pinnedConversationIds.value.filter(item => item !== key)
+    const shouldPin = next.length === pinnedConversationIds.value.length
+    if (shouldPin) {
+      next.unshift(key)
+    }
+    pinnedConversationIds.value = next
+    persistPinnedConversationIds(next)
+    conversations.value = orderConversations(conversations.value)
+    return shouldPin
   }
 
   async function selectConversation(id) {
@@ -236,7 +325,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function cancelGeneration() {
-    if (!loading.value || canceling.value) {
+    if ((!loading.value && !isModelLoadingStatus()) || canceling.value) {
       return false
     }
 
@@ -276,6 +365,7 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = true
     loadingConversationId.value = convId
     let traceTimer = null
+    let statusTimer = null
     const pollTrace = async () => {
       try {
         await fetchInferenceTrace()
@@ -283,6 +373,15 @@ export const useChatStore = defineStore('chat', () => {
         // ignore trace polling errors
       }
     }
+    const pollStatus = async () => {
+      try {
+        await fetchInferenceStatus()
+      } catch {
+        // ignore status polling errors
+      }
+    }
+    await pollStatus()
+    statusTimer = window.setInterval(pollStatus, CHAT_STATUS_POLL_INTERVAL_MS)
     if (isTraceEnabled()) {
       await pollTrace()
       traceTimer = window.setInterval(pollTrace, 700)
@@ -344,6 +443,10 @@ export const useChatStore = defineStore('chat', () => {
         window.clearInterval(traceTimer)
         traceTimer = null
       }
+      if (statusTimer) {
+        window.clearInterval(statusTimer)
+        statusTimer = null
+      }
       if (isTraceEnabled()) {
         try {
           await fetchInferenceTrace()
@@ -369,6 +472,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     conversations,
+    pinnedConversationIds,
     currentConversation,
     messages,
     loading,
@@ -381,6 +485,9 @@ export const useChatStore = defineStore('chat', () => {
     fetchConversations,
     createConversation,
     deleteConversation,
+    renameConversation,
+    togglePinConversation,
+    isConversationPinned,
     selectConversation,
     fetchInferenceStatus,
     fetchInferenceTrace,

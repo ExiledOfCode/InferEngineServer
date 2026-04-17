@@ -4,7 +4,7 @@
       <div class="sidebar-brand">
         <div class="brand-mark">江</div>
         <div class="brand-text">
-          <h1>江屿大模型</h1>
+          <h1>自研推理引擎对话平台</h1>
           <p>管理控制台</p>
         </div>
       </div>

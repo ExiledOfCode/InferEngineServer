@@ -20,21 +20,48 @@
         <span v-if="!sidebarCollapsed">推理引擎 {{ chatStore.inferenceStatus?.running ? '在线' : '离线' }}</span>
       </div>
 
+      <div v-if="!sidebarCollapsed" class="conversation-section-label">最近</div>
       <div class="conversation-list">
-        <button
+        <div
           v-for="conv in chatStore.conversations"
           :key="conv.id"
           class="conversation-item"
           :class="{ active: chatStore.currentConversation?.id === conv.id }"
+          role="button"
+          tabindex="0"
           @click="handleSelectConversation(conv.id)"
+          @keydown.enter.prevent="handleSelectConversation(conv.id)"
+          @keydown.space.prevent="handleSelectConversation(conv.id)"
         >
           <el-icon class="conv-icon"><ChatDotRound /></el-icon>
           <div v-if="!sidebarCollapsed" class="conversation-text">
-            <span class="conv-title">{{ conv.title || '新对话' }}</span>
+            <div class="conversation-title-row">
+              <span class="conv-title">{{ conv.title || '新对话' }}</span>
+              <span v-if="chatStore.isConversationPinned(conv.id)" class="pin-mark">置顶</span>
+            </div>
             <span class="conv-time">{{ formatConversationTime(conv.updated_at || conv.created_at) }}</span>
           </div>
-          <el-icon v-if="!sidebarCollapsed" class="delete-btn" @click.stop="handleDelete(conv.id)"><Delete /></el-icon>
-        </button>
+          <el-dropdown
+            v-if="!sidebarCollapsed"
+            class="conversation-menu"
+            trigger="click"
+            placement="bottom-end"
+            @command="command => handleConversationCommand(command, conv)"
+          >
+            <button class="conversation-menu-btn" type="button" aria-label="对话操作" @click.stop>
+              <span></span><span></span><span></span>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                <el-dropdown-item command="pin">
+                  {{ chatStore.isConversationPinned(conv.id) ? '取消置顶' : '置顶' }}
+                </el-dropdown-item>
+                <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </div>
 
       <div class="user-panel" :class="{ collapsed: sidebarCollapsed }">
@@ -54,14 +81,25 @@
 
     <div v-if="mobileSidebarOpen" class="sidebar-mask" @click="mobileSidebarOpen = false"></div>
 
-    <section class="chat-main">
+    <section class="chat-main" :class="{ 'empty-chat': chatStore.messages.length === 0 }">
       <header class="chat-header">
         <div class="header-meta">
-          <h1>{{ currentTitle }}</h1>
-          <p>
-            江屿大模型 · {{ chatStore.inferenceStatus?.running ? '模型已连接' : '等待模型连接' }}
-            <template v-if="currentModelName"> · {{ currentModelName }}</template>
-          </p>
+          <h1>自研推理引擎对话平台</h1>
+          <div class="current-model-line">
+            <span class="current-model-name">{{ currentModelName || '未选择模型' }}</span>
+            <div v-if="modelLoadingVisible" class="model-loading-inline">
+              <div class="model-loading-inline-bar">
+                <el-progress
+                  :percentage="modelLoadingPercentage"
+                  :stroke-width="6"
+                  :show-text="false"
+                />
+              </div>
+              <span class="model-loading-inline-text">
+                {{ formatBytes(modelLoadingLoadedBytes) }} / {{ formatBytes(modelLoadingTotalBytes) }}
+              </span>
+            </div>
+          </div>
         </div>
         <div class="header-actions">
           <div class="model-switcher">
@@ -106,8 +144,8 @@
       <main class="message-list" ref="messageListRef">
         <div class="message-track">
           <div v-if="chatStore.messages.length === 0" class="welcome-card">
-            <h2>有什么可以帮忙的？</h2>
-            <p>欢迎使用江屿大模型，输入你的问题开始对话。</p>
+            <h2>今天有什么计划？</h2>
+            <p>欢迎使用自研推理引擎对话平台，输入你的问题开始对话。</p>
           </div>
 
           <article
@@ -120,17 +158,24 @@
             <div v-if="msg.role !== 'user'" class="assistant-avatar">
               <el-icon><Monitor /></el-icon>
             </div>
-            <div class="message-body" :class="[msg.role, { thinking: msg.role === 'assistant' && !!msg.reasoning_content && thinkEnabled }]">
-              <template v-if="msg.role === 'assistant' && msg.reasoning_content && thinkEnabled">
-                <details class="assistant-think-panel">
-                  <summary>思考过程</summary>
-                  <pre class="assistant-think-text">{{ msg.reasoning_content }}</pre>
-                </details>
-                <div class="assistant-answer-text">{{ msg.content }}</div>
-              </template>
-              <template v-else>
-                {{ msg.content }}
-              </template>
+            <div class="message-stack">
+              <div class="message-body" :class="[msg.role, { thinking: msg.role === 'assistant' && !!msg.reasoning_content && thinkEnabled }]">
+                <div class="message-content">
+                  <template v-if="msg.role === 'assistant' && msg.reasoning_content && thinkEnabled">
+                    <details class="assistant-think-panel">
+                      <summary>思考过程</summary>
+                      <pre class="assistant-think-text">{{ msg.reasoning_content }}</pre>
+                    </details>
+                    <div class="assistant-answer-text">{{ msg.content }}</div>
+                  </template>
+                  <template v-else>
+                    {{ msg.content }}
+                  </template>
+                </div>
+              </div>
+              <div class="message-actions">
+                <button class="message-action-btn" type="button" @click.stop="handleCopyMessage(msg)">复制</button>
+              </div>
             </div>
           </article>
 
@@ -150,24 +195,27 @@
 
       <footer class="composer-area">
         <div class="composer-box">
+          <button class="composer-plus-btn" type="button" title="新对话" @click="handleNewChat">
+            <el-icon><Plus /></el-icon>
+          </button>
           <el-input
             ref="inputRef"
             v-model="inputMessage"
             type="textarea"
             :rows="1"
             :autosize="{ minRows: 1, maxRows: 8 }"
-            placeholder="给 江屿大模型 发消息"
-            :disabled="chatStore.loading"
+            placeholder="有问题，尽管问"
+            :disabled="composerStopping"
             @keydown.enter.exact.prevent="handleSend"
           />
           <button
             class="send-btn"
-            :class="{ stopping: chatStore.loading, busy: chatStore.canceling }"
-            :disabled="chatStore.loading ? chatStore.canceling : !inputMessage.trim()"
-            :title="chatStore.loading ? '停止生成' : '发送消息'"
+            :class="{ stopping: composerStopping, busy: chatStore.canceling }"
+            :disabled="composerStopping ? chatStore.canceling : !inputMessage.trim()"
+            :title="composerActionTitle"
             @click="handleComposerAction"
           >
-            <span v-if="chatStore.loading" class="send-btn-stop-square" aria-hidden="true"></span>
+            <span v-if="composerStopping" class="send-btn-stop-square" aria-hidden="true"></span>
             <el-icon v-else><Promotion /></el-icon>
           </button>
         </div>
@@ -429,11 +477,31 @@ const THINK_PREFERENCE_KEY = 'chat:show-think'
 const thinkEnabled = ref(readThinkPreference())
 let statusTimer = null
 
-const currentTitle = computed(() => chatStore.currentConversation?.title || '新对话')
 const availableModels = computed(() => (Array.isArray(chatStore.inferenceStatus?.available_models) ? chatStore.inferenceStatus.available_models : []))
 const currentModelName = computed(() => chatStore.inferenceStatus?.current_model_name || '')
 const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.current_model_family || '').toLowerCase())
 const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
+const modelLoadingProgress = computed(() => chatStore.inferenceStatus?.model_loading_progress || null)
+const modelLoadingState = computed(() => String(modelLoadingProgress.value?.state || '').toLowerCase())
+const modelLoadingVisible = computed(() => ['starting', 'loading'].includes(modelLoadingState.value))
+const modelLoadingLoadedBytes = computed(() => Number(modelLoadingProgress.value?.loaded_bytes || 0))
+const modelLoadingTotalBytes = computed(() => Number(modelLoadingProgress.value?.total_bytes || 0))
+const modelLoadingPercentage = computed(() => {
+  const raw = Number(modelLoadingProgress.value?.percentage)
+  if (Number.isFinite(raw)) {
+    return Math.max(0, Math.min(100, Math.round(raw)))
+  }
+  const total = modelLoadingTotalBytes.value
+  if (total <= 0) {
+    return 0
+  }
+  return Math.max(0, Math.min(100, Math.round((modelLoadingLoadedBytes.value / total) * 100)))
+})
+const composerStopping = computed(() => chatStore.loading || modelLoadingVisible.value)
+const composerActionTitle = computed(() => {
+  if (!composerStopping.value) return '发送消息'
+  return modelLoadingVisible.value ? '停止模型加载' : '停止生成'
+})
 const logicFlowLabel = computed(() => {
   if (currentModelFamily.value === 'qwen3') return 'Qwen3 逻辑流程图'
   if (currentModelFamily.value === 'qwen2') return 'Qwen2 逻辑流程图'
@@ -565,6 +633,56 @@ function formatDuration(ms) {
   return `${value.toFixed(2)} ms`
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B'
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let index = 0
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index += 1
+  }
+  const digits = index === 0 || size >= 100 ? 0 : 1
+  return `${size.toFixed(digits)} ${units[index]}`
+}
+
+function fallbackCopyText(text) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  if (!copied) {
+    throw new Error('复制失败')
+  }
+}
+
+async function handleCopyMessage(message) {
+  const text = String(message?.content || '').trim()
+  if (!text) {
+    ElMessage.warning('没有可复制的内容')
+    return
+  }
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      fallbackCopyText(text)
+    }
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
 function startTraceResize(event) {
   if (window.innerWidth <= 1100 || traceSidebarCollapsed.value) {
     return
@@ -693,18 +811,18 @@ async function handleNewChat() {
 
 async function handleSend() {
   const content = inputMessage.value.trim()
-  if (!content || chatStore.loading) return
+  if (!content || composerStopping.value) return
   inputMessage.value = ''
   await chatStore.sendMessage(content, thinkEnabled.value)
   nextTick(() => inputRef.value?.focus && inputRef.value.focus())
 }
 
 async function handleComposerAction() {
-  if (chatStore.loading) {
+  if (composerStopping.value) {
     try {
       await chatStore.cancelGeneration()
     } catch (e) {
-      ElMessage.error(formatErrorMessage(e, '停止生成失败'))
+      ElMessage.error(formatErrorMessage(e, modelLoadingVisible.value ? '停止模型加载失败' : '停止生成失败'))
     }
     return
   }
@@ -736,6 +854,43 @@ async function handleDelete(id) {
   }
 }
 
+async function handleRenameConversation(conversation) {
+  try {
+    const result = await ElMessageBox.prompt('输入新的对话名称', '重命名', {
+      inputValue: conversation?.title || '新对话',
+      inputValidator: value => (String(value || '').trim() ? true : '对话名称不能为空'),
+      confirmButtonText: '保存',
+      cancelButtonText: '取消'
+    })
+    const title = String(result?.value || '').trim()
+    await chatStore.renameConversation(conversation.id, title)
+    ElMessage.success('已重命名')
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(formatErrorMessage(e, '重命名失败'))
+    }
+  }
+}
+
+function handlePinConversation(conversation) {
+  const pinned = chatStore.togglePinConversation(conversation.id)
+  ElMessage.success(pinned ? '已置顶' : '已取消置顶')
+}
+
+function handleConversationCommand(command, conversation) {
+  if (command === 'rename') {
+    handleRenameConversation(conversation)
+    return
+  }
+  if (command === 'pin') {
+    handlePinConversation(conversation)
+    return
+  }
+  if (command === 'delete') {
+    handleDelete(conversation.id)
+  }
+}
+
 function handleMessageClick(message) {
   if (!message || message.role !== 'assistant') {
     return
@@ -756,58 +911,73 @@ function handleLogout() {
 
 <style scoped>
 .chat-shell {
+  --surface-sidebar: #f7f7f8;
+  --surface-sidebar-hover: #ececec;
+  --surface-main: #ffffff;
+  --surface-input: #ffffff;
+  --surface-ai-message: #ffffff;
+  --surface-user-message: #f4f4f4;
+  --border-subtle: #e5e5e5;
+  --border-strong: #d8d8d8;
+  --text-primary: #171717;
+  --text-secondary: #4b5563;
+  --text-muted: #8a8f98;
+  --accent-color: #111111;
+  --accent-color-strong: #000000;
+  --danger-color: #c03535;
+  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-float: 0 18px 42px rgba(0, 0, 0, 0.14);
   position: relative;
   display: flex;
   height: 100vh;
-  background:
-    radial-gradient(circle at 85% -10%, rgba(16, 163, 127, 0.12), transparent 38%),
-    linear-gradient(180deg, #f8fafd 0%, #f5f7fb 100%);
+  background: #ffffff;
+  color: var(--text-primary);
 }
 
 .chat-sidebar {
-  width: 282px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 12px;
-  border-right: 1px solid var(--border-subtle);
+  gap: 8px;
+  padding: 8px;
+  border-right: 1px solid #efefef;
   background: var(--surface-sidebar);
   z-index: 12;
   transition: width 0.22s ease, padding 0.22s ease;
 }
 
 .chat-sidebar.collapsed {
-  width: 84px;
-  padding: 14px 10px;
+  width: 58px;
+  padding: 8px 6px;
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
 .new-chat-btn {
   flex: 1;
-  height: 42px;
-  border-radius: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-main);
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: #ececec;
   color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
+  padding: 0 10px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .new-chat-btn:hover {
-  background: #fdfefe;
-  border-color: #aebad0;
+  background: #e4e4e4;
 }
 
 .new-chat-btn:disabled {
@@ -817,16 +987,17 @@ function handleLogout() {
 
 .chat-sidebar.collapsed .new-chat-btn {
   flex: unset;
-  width: 42px;
+  width: 36px;
   padding: 0;
+  justify-content: center;
 }
 
 .sidebar-toggle {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: #f6f8fb;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
@@ -835,32 +1006,31 @@ function handleLogout() {
 }
 
 .sidebar-toggle:hover {
-  border-color: #bcc7d8;
-  background: #f3f6fb;
+  background: #ececec;
 }
 
 .sidebar-close {
   display: none;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: #f6f8fb;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
 }
 
 .engine-status {
-  height: 38px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: #f8fafc;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
-  font-size: 13px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .chat-sidebar.collapsed .engine-status {
@@ -877,13 +1047,18 @@ function handleLogout() {
 
 .engine-status.online {
   color: #0f766e;
-  border-color: #8ee5c5;
-  background: #ecfff8;
+  background: transparent;
 }
 
 .engine-status.online .status-dot {
-  background: var(--accent-color);
-  box-shadow: 0 0 0 4px rgba(16, 163, 127, 0.18);
+  background: #10a37f;
+  box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.14);
+}
+
+.conversation-section-label {
+  padding: 10px 8px 4px;
+  color: #9b9b9b;
+  font-size: 12px;
 }
 
 .conversation-list {
@@ -892,23 +1067,25 @@ function handleLogout() {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-right: 3px;
+  gap: 2px;
+  padding-right: 0;
 }
 
 .conversation-item {
   width: 100%;
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 10px;
+  min-height: 34px;
+  padding: 7px 8px;
   text-align: left;
   cursor: pointer;
   transition: background 0.2s ease, transform 0.15s ease;
+  outline: none;
 }
 
 .chat-sidebar.collapsed .conversation-item {
@@ -921,7 +1098,11 @@ function handleLogout() {
 }
 
 .conversation-item.active {
-  background: #dce4f0;
+  background: #ececec;
+}
+
+.conversation-item:focus-visible {
+  box-shadow: 0 0 0 2px rgba(17, 17, 17, 0.16);
 }
 
 .conv-icon {
@@ -937,38 +1118,81 @@ function handleLogout() {
   gap: 2px;
 }
 
+.conversation-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .conv-title {
+  min-width: 0;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.pin-mark {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 6px;
+  background: #e6f5ef;
+  color: #0f766e;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .conv-time {
+  display: none;
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.delete-btn {
-  color: #9aa3b4;
-  opacity: 0;
-  transition: opacity 0.2s ease, color 0.2s ease;
+.conversation-menu {
+  flex-shrink: 0;
 }
 
-.conversation-item:hover .delete-btn {
+.conversation-menu-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.conversation-menu-btn span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.conversation-item:hover .conversation-menu-btn,
+.conversation-item:focus-within .conversation-menu-btn,
+.conversation-item.active .conversation-menu-btn {
   opacity: 1;
 }
 
-.delete-btn:hover {
-  color: var(--danger-color);
+.conversation-menu-btn:hover {
+  background: #dedede;
 }
 
 .user-panel {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: #f7f9fc;
-  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -989,10 +1213,10 @@ function handleLogout() {
 }
 
 .avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(140deg, #2f4a80, #1f2f52);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #10a37f;
   color: #fff;
   font-size: 14px;
   font-weight: 700;
@@ -1022,10 +1246,10 @@ function handleLogout() {
 }
 
 .logout-btn {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--text-secondary);
   background: transparent;
   display: inline-flex;
@@ -1035,7 +1259,7 @@ function handleLogout() {
 }
 
 .logout-btn:hover {
-  background: #e9eef6;
+  background: #ececec;
 }
 
 .chat-main {
@@ -1043,14 +1267,15 @@ function handleLogout() {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
+  background: #ffffff;
 }
 
 .chat-header {
-  min-height: 62px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(8px);
-  padding: 10px 22px;
+  min-height: 52px;
+  border-bottom: 0;
+  background: #ffffff;
+  padding: 8px 28px 6px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1072,7 +1297,7 @@ function handleLogout() {
 .model-switcher {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .model-switcher-label {
@@ -1082,14 +1307,14 @@ function handleLogout() {
 }
 
 .model-switcher-select {
-  width: 240px;
+  width: 210px;
 }
 
 .model-switcher-select :deep(.el-select__wrapper) {
-  min-height: 34px;
-  border-radius: 10px;
-  background: #f6f8fc;
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  min-height: 30px;
+  border-radius: 8px;
+  background: #f7f7f8;
+  box-shadow: none;
 }
 
 .model-switcher-select :deep(.el-select__placeholder),
@@ -1110,11 +1335,11 @@ function handleLogout() {
 }
 
 .think-toggle {
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: #f6f8fc;
-  padding: 0 10px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: #f7f7f8;
+  padding: 0 8px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1127,12 +1352,12 @@ function handleLogout() {
 }
 
 .think-toggle :deep(.el-switch) {
-  --el-switch-on-color: var(--accent-color);
+  --el-switch-on-color: #111111;
   --el-switch-off-color: #c8d1df;
 }
 
 .header-meta h1 {
-  font-size: 17px;
+  font-size: 15px;
   color: var(--text-primary);
   font-weight: 650;
   white-space: nowrap;
@@ -1140,40 +1365,79 @@ function handleLogout() {
   text-overflow: ellipsis;
 }
 
-.header-meta p {
-  margin-top: 2px;
+.current-model-line {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.current-model-name {
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-loading-inline {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-loading-inline-bar {
+  width: 150px;
+  flex-shrink: 0;
+}
+
+.model-loading-inline-text {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.model-loading-inline :deep(.el-progress-bar__outer) {
+  background-color: #eeeeee;
+}
+
+.model-loading-inline :deep(.el-progress-bar__inner) {
+  background-color: #111111;
 }
 
 .message-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 0 16px;
+  padding: 14px 0 16px;
 }
 
 .message-track {
-  width: min(920px, calc(100% - 32px));
+  width: min(820px, calc(100% - 44px));
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 34px;
 }
 
 .welcome-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: 20px;
-  background: var(--surface-main);
-  box-shadow: var(--shadow-card);
-  padding: 28px 26px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  text-align: center;
 }
 
 .welcome-card h2 {
-  font-size: 30px;
+  font-size: 34px;
   line-height: 1.2;
-  color: #111827;
-  font-weight: 680;
+  color: #171717;
+  font-weight: 650;
 }
 
 .welcome-card p {
@@ -1202,14 +1466,13 @@ function handleLogout() {
 }
 
 .message-row.clickable:hover .assistant-avatar {
-  box-shadow: 0 10px 24px rgba(47, 74, 128, 0.16);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
   transform: translateY(-1px);
 }
 
 .message-row.clickable:hover .message-body.assistant {
-  border-color: #b7c6de;
-  background: #f9fbff;
-  box-shadow: 0 14px 30px rgba(31, 47, 82, 0.08);
+  background: #fafafa;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.06);
   transform: translateY(-1px);
 }
 
@@ -1217,7 +1480,7 @@ function handleLogout() {
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #10a37f, #0f7d62);
+  background: #10a37f;
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -1226,9 +1489,22 @@ function handleLogout() {
   margin-top: 2px;
 }
 
-.message-body {
+.message-stack {
+  position: relative;
   max-width: min(84%, 780px);
-  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.message-row.user .message-stack {
+  align-items: flex-end;
+}
+
+.message-body {
+  position: relative;
+  max-width: 100%;
+  border-radius: 12px;
   padding: 12px 14px;
   line-height: 1.75;
   font-size: 15px;
@@ -1236,9 +1512,57 @@ function handleLogout() {
   word-break: break-word;
 }
 
+.message-content {
+  min-width: 0;
+}
+
+.message-actions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.message-row.user .message-actions {
+  right: 0;
+  left: auto;
+}
+
+.message-row:hover .message-actions,
+.message-row:focus-within .message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.message-action-btn {
+  min-width: 34px;
+  height: 28px;
+  border: 1px solid #cfd8e6;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-secondary);
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 26px;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(31, 47, 82, 0.1);
+}
+
+.message-action-btn:hover {
+  border-color: #aab8cc;
+  color: var(--text-primary);
+  background: #f8fafc;
+}
+
 .message-body.assistant {
   background: var(--surface-ai-message);
-  border: 1px solid var(--border-subtle);
+  border: 0;
   color: var(--text-primary);
 }
 
@@ -1250,14 +1574,14 @@ function handleLogout() {
 
 .message-body.user {
   background: var(--surface-user-message);
-  border: 1px solid #d2d9e6;
-  color: #1a2233;
+  border: 0;
+  color: #171717;
 }
 
 .assistant-think-panel {
-  border-radius: 12px;
-  border: 1px solid #d8e2f0;
-  background: #f8fbff;
+  border-radius: 8px;
+  border: 1px solid #e5e5e5;
+  background: #fafafa;
   overflow: hidden;
 }
 
@@ -1267,8 +1591,8 @@ function handleLogout() {
   padding: 10px 12px;
   font-size: 13px;
   font-weight: 600;
-  color: #36537c;
-  background: #eef4fb;
+  color: #4b5563;
+  background: #f2f2f2;
 }
 
 .assistant-think-panel summary::-webkit-details-marker {
@@ -1282,7 +1606,7 @@ function handleLogout() {
   word-break: break-word;
   font-size: 13px;
   line-height: 1.7;
-  color: #52637d;
+  color: #4b5563;
 }
 
 .assistant-answer-text {
@@ -1292,6 +1616,7 @@ function handleLogout() {
 
 .message-body.loading {
   min-width: 64px;
+  padding: 12px 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1329,21 +1654,40 @@ function handleLogout() {
 
 .composer-area {
   padding: 12px 0 16px;
-  border-top: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.95);
+  border-top: 0;
+  background: #ffffff;
 }
 
 .composer-box {
-  width: min(920px, calc(100% - 32px));
+  width: min(700px, calc(100% - 44px));
   margin: 0 auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 18px;
+  border: 1px solid #d9d9d9;
+  border-radius: 28px;
   background: var(--surface-input);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 10px;
-  padding: 10px 10px 10px 14px;
+  min-height: 58px;
+  padding: 10px 12px 10px 14px;
+}
+
+.composer-plus-btn {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #5f6368;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.composer-plus-btn:hover {
+  background: #f1f1f1;
 }
 
 .composer-box :deep(.el-textarea__inner) {
@@ -1351,21 +1695,22 @@ function handleLogout() {
   box-shadow: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 15px;
-  line-height: 1.55;
-  padding: 2px 0 4px;
+  min-height: 30px !important;
+  font-size: 18px;
+  line-height: 30px;
+  padding: 0;
 }
 
 .composer-box :deep(.el-textarea__inner::placeholder) {
-  color: #9aa4b2;
+  color: #8e8e8e;
 }
 
 .send-btn {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: 11px;
-  background: var(--accent-color);
+  border-radius: 50%;
+  background: #111111;
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -1376,7 +1721,7 @@ function handleLogout() {
 }
 
 .send-btn:hover:not(:disabled) {
-  background: var(--accent-color-strong);
+  background: #000000;
 }
 
 .send-btn.stopping {
@@ -1398,18 +1743,58 @@ function handleLogout() {
 }
 
 .send-btn-stop-square {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 3px;
   background: currentColor;
 }
 
 .composer-note {
-  width: min(920px, calc(100% - 32px));
+  width: min(700px, calc(100% - 44px));
   margin: 8px auto 0;
   color: var(--text-muted);
   text-align: center;
   font-size: 12px;
+}
+
+.chat-main.empty-chat .message-list {
+  position: relative;
+  display: block;
+  padding: 0;
+}
+
+.chat-main.empty-chat .message-track {
+  position: absolute;
+  left: 50%;
+  top: 33%;
+  width: min(700px, calc(100% - 72px));
+  min-height: 0;
+  display: block;
+  padding: 0;
+  transform: translateX(-50%);
+}
+
+.chat-main.empty-chat .welcome-card p {
+  display: none;
+}
+
+.chat-main.empty-chat .composer-area {
+  position: absolute;
+  left: 50%;
+  top: calc(33% + 128px);
+  z-index: 5;
+  width: min(700px, calc(100% - 72px));
+  padding: 0;
+  transform: translateX(-50%);
+  background: transparent;
+}
+
+.chat-main.empty-chat .composer-box {
+  width: 100%;
+}
+
+.chat-main.empty-chat .composer-note {
+  display: none;
 }
 
 .sidebar-mask {
@@ -1428,7 +1813,15 @@ function handleLogout() {
 }
 
 .trace-sidebar.collapsed {
-  width: 58px;
+  width: 0;
+  border-left: 0;
+  overflow: hidden;
+}
+
+.trace-sidebar.collapsed .trace-sidebar-header,
+.trace-sidebar.collapsed .trace-sidebar-body,
+.trace-sidebar.collapsed .trace-resize-handle {
+  display: none;
 }
 
 .trace-sidebar-header {
@@ -1834,12 +2227,29 @@ function handleLogout() {
   .chat-header {
     padding: 10px 14px;
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .current-model-line {
+    flex-wrap: wrap;
+  }
+
+  .model-loading-inline {
+    flex-wrap: wrap;
+  }
+
+  .model-loading-inline-bar {
+    width: 120px;
   }
 
   .message-track,
   .composer-box,
   .composer-note {
     width: calc(100% - 20px);
+  }
+
+  .chat-main.empty-chat .composer-area {
+    width: calc(100% - 28px);
   }
 
   .message-body {

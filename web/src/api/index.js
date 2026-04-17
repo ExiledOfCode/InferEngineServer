@@ -176,6 +176,7 @@ export const adminApi = {
 export const chatApi = {
   getConversations: () => api.get('/conversations'),
   createConversation: (data = {}) => api.post('/conversations', data),
+  updateConversation: (id, data = {}) => api.put(`/conversations/${id}`, data),
   deleteConversation: (id) => api.delete(`/conversations/${id}`),
   getMessages: (id) => api.get(`/conversations/${id}/messages`),
   sendMessage: (id, content, thinkEnabled = true) => api.post(

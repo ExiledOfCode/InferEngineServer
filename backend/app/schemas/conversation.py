@@ -5,6 +5,9 @@ from typing import Optional
 class ConversationCreate(BaseModel):
     title: Optional[str] = "新对话"
 
+class ConversationUpdate(BaseModel):
+    title: Optional[str] = None
+
 class ConversationResponse(BaseModel):
     id: int
     user_id: int

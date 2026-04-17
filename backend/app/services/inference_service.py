@@ -63,12 +63,14 @@ class InferenceService:
         self.stdin_lock = threading.Lock()
         self.counter_lock = threading.Lock()
         self.trace_lock = threading.Lock()
+        self.load_progress_lock = threading.Lock()
         self.request_state_lock = threading.Lock()
         self.request_counter = 0
         self.active_request_id: Optional[int] = None
         self.cancel_requested = False
         self.current_trace: Optional[Dict[str, Any]] = None
         self.last_trace: Optional[Dict[str, Any]] = None
+        self.model_loading_progress: Dict[str, Any] = {"state": "idle"}
 
         legacy_max_steps = self._read_optional_positive_int("INFERENCE_MAX_STEPS")
         default_max_new_tokens = legacy_max_steps if legacy_max_steps is not None else 128
@@ -596,6 +598,11 @@ class InferenceService:
         with self.request_state_lock:
             return bool(self.active_request_id is not None and self.cancel_requested)
 
+    def _is_model_loading(self) -> bool:
+        with self.load_progress_lock:
+            state = str((self.model_loading_progress or {}).get("state") or "").strip().lower()
+        return state in {"starting", "loading"}
+
     def _clear_active_request(self, req_id: int):
         with self.request_state_lock:
             if self.active_request_id == req_id:
@@ -622,6 +629,15 @@ class InferenceService:
             }
 
         self._set_cancel_requested(True)
+        if self._is_model_loading():
+            self._set_model_loading_progress("cancelled", stage="cancelled")
+            self._stop_process(clear_request_state=False)
+            return {
+                "accepted": True,
+                "request_id": req_id,
+                "detail": "已请求停止模型加载。",
+            }
+
         if already_requested:
             return {
                 "accepted": True,
@@ -857,7 +873,65 @@ class InferenceService:
         if not stdout:
             return
         for raw_line in str(stdout).splitlines():
+            self._consume_load_progress_line(raw_line)
             self._consume_trace_line(raw_line)
+
+    def _model_weight_file_size(self) -> int:
+        try:
+            if self.model_path and os.path.exists(self.model_path):
+                return int(os.path.getsize(self.model_path))
+        except Exception:
+            pass
+        return 0
+
+    def _set_model_loading_progress(
+        self,
+        state: str,
+        loaded_bytes: Optional[int] = None,
+        total_bytes: Optional[int] = None,
+        stage: str = "",
+        error: str = "",
+    ):
+        with self.load_progress_lock:
+            previous = self.model_loading_progress if isinstance(self.model_loading_progress, dict) else {}
+            loaded = int(loaded_bytes if loaded_bytes is not None else previous.get("loaded_bytes", 0) or 0)
+            total = int(total_bytes if total_bytes is not None else previous.get("total_bytes", 0) or 0)
+            percent = 0.0
+            if total > 0:
+                percent = max(0.0, min(100.0, loaded * 100.0 / total))
+            payload = {
+                "state": state,
+                "loaded_bytes": max(0, loaded),
+                "total_bytes": max(0, total),
+                "percentage": percent,
+                "stage": stage or str(previous.get("stage") or ""),
+                "updated_at": time.time(),
+                "model_id": self.current_model_id,
+                "model_name": self.current_model_name,
+            }
+            if error:
+                payload["error"] = self._truncate_text(error, 240)
+            self.model_loading_progress = payload
+
+    def _consume_load_progress_line(self, line: str) -> bool:
+        text = str(line or "").strip()
+        if not text.startswith("[LOAD_PROGRESS]"):
+            return False
+
+        payload_text = text[len("[LOAD_PROGRESS]") :].strip()
+        try:
+            payload = json.loads(payload_text) if payload_text else {}
+        except Exception:
+            return True
+        if not isinstance(payload, dict):
+            return True
+
+        loaded = self._coerce_positive_int(payload.get("loaded_bytes"), 0)
+        total = self._coerce_positive_int(payload.get("total_bytes"), 0)
+        stage = str(payload.get("stage") or "").strip()
+        state = "ready" if total > 0 and loaded >= total else "loading"
+        self._set_model_loading_progress(state, loaded, total, stage)
+        return True
 
     @staticmethod
     def _append_diag_line(lines: List[str], line: str, limit: int = 8):
@@ -1341,6 +1415,12 @@ class InferenceService:
         self.prompt_format = prompt_format if prompt_format in {"raw", "chatml", "auto"} else self.default_prompt_format
         self.raw_with_history = self._coerce_bool(entry.get("raw_with_history"), self.default_raw_with_history)
         self.system_prompt = str(entry.get("system_prompt") or self.default_system_prompt).strip() or self.default_system_prompt
+        self._set_model_loading_progress(
+            "idle",
+            loaded_bytes=0,
+            total_bytes=self._model_weight_file_size(),
+            stage="",
+        )
 
     def _public_model_info(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         executable = entry.get("executable")
@@ -1408,6 +1488,16 @@ class InferenceService:
         if self.is_running():
             return
 
+        self._set_model_loading_progress(
+            "starting",
+            loaded_bytes=0,
+            total_bytes=self._model_weight_file_size(),
+            stage="start",
+        )
+        if self._is_cancel_requested():
+            self._set_model_loading_progress("cancelled", stage="cancelled")
+            return
+
         try:
             self.process = subprocess.Popen(
                 [
@@ -1430,6 +1520,7 @@ class InferenceService:
         except Exception as exc:
             print(f"✗ 推理进程启动失败: {exc}")
             self.process = None
+            self._set_model_loading_progress("error", error=str(exc))
             return
 
         self._start_stdout_reader()
@@ -1437,6 +1528,10 @@ class InferenceService:
         deadline = time.monotonic() + float(self.startup_timeout_seconds)
         ready = False
         while True:
+            if self._is_cancel_requested():
+                self._set_model_loading_progress("cancelled", stage="cancelled")
+                self._stop_process(clear_request_state=False)
+                return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
@@ -1447,24 +1542,49 @@ class InferenceService:
             if text.strip() == "[READY]":
                 ready = True
                 break
+            if self._consume_load_progress_line(text):
+                continue
             if self._consume_trace_line(text):
                 continue
             self._append_diag_line(startup_logs, text)
 
         if not ready:
+            if self._is_cancel_requested():
+                self._set_model_loading_progress("cancelled", stage="cancelled")
+                self._stop_process(clear_request_state=False)
+                return
             detail = self._format_diag_lines(startup_logs)
             if self.process and self.process.poll() is not None:
                 message = f"✗ 推理进程启动失败（未收到 READY，退出码 {self.process.returncode}）"
                 if detail:
                     message += f"，最近日志: {detail}"
                 print(message)
+                self._set_model_loading_progress("error", error=message)
             else:
                 message = f"✗ 推理引擎启动超时（{self.startup_timeout_seconds}s，未收到 READY）"
                 if detail:
                     message += f"，最近日志: {detail}"
                 print(message)
+                self._set_model_loading_progress("error", error=message)
             self._stop_process()
             return
+
+        with self.load_progress_lock:
+            current_loading = deepcopy(self.model_loading_progress)
+        self._set_model_loading_progress(
+            "ready",
+            loaded_bytes=(
+                current_loading.get("total_bytes")
+                or current_loading.get("loaded_bytes")
+                or self._model_weight_file_size()
+            ),
+            total_bytes=(
+                current_loading.get("total_bytes")
+                or current_loading.get("loaded_bytes")
+                or self._model_weight_file_size()
+            ),
+            stage="ready",
+        )
 
         print("=" * 50)
         print("推理模式: 常驻进程（每条消息触发一次 generate）")
@@ -1516,7 +1636,7 @@ class InferenceService:
             return None
         return line
 
-    def _stop_process(self):
+    def _stop_process(self, clear_request_state: bool = True):
         if not self.process:
             return
         try:
@@ -1534,9 +1654,10 @@ class InferenceService:
         self.process = None
         self.stdout_queue = None
         self.stdout_reader = None
-        with self.request_state_lock:
-            self.active_request_id = None
-            self.cancel_requested = False
+        if clear_request_state:
+            with self.request_state_lock:
+                self.active_request_id = None
+                self.cancel_requested = False
 
     def is_ready(self) -> bool:
         return all(
@@ -1777,6 +1898,8 @@ class InferenceService:
                     return "推理进程已退出，请重试。"
 
                 text = line.rstrip("\n")
+                if self._consume_load_progress_line(text):
+                    continue
                 if self._consume_trace_line(text):
                     continue
                 if text == "[CANCELLED]":
@@ -1857,6 +1980,8 @@ class InferenceService:
                 continue
             if line.startswith("[TRACE]"):
                 continue
+            if line.startswith("[LOAD_PROGRESS]"):
+                continue
             if line.startswith("steps:") or line.startswith("duration:") or line.startswith("steps/s:"):
                 continue
             lines.append(raw_line)
@@ -1911,6 +2036,8 @@ class InferenceService:
         return "\n".join(kept).strip()
 
     def debug_status(self) -> Dict[str, object]:
+        with self.load_progress_lock:
+            loading_progress = deepcopy(self.model_loading_progress)
         return {
             "ready": self.is_ready(),
             "running": self.is_running(),
@@ -1948,6 +2075,7 @@ class InferenceService:
             "eager_start": self.eager_start,
             "pid": self.process.pid if self.process and self.is_running() else None,
             "trace_state": self.trace_status().get("state", "idle"),
+            "model_loading_progress": loading_progress,
         }
 
     def _mock_response(self, prompt: str) -> str:
