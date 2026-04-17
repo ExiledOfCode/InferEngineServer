@@ -164,12 +164,12 @@
                   <template v-if="msg.role === 'assistant' && msg.reasoning_content && thinkEnabled">
                     <details class="assistant-think-panel">
                       <summary>思考过程</summary>
-                      <pre class="assistant-think-text">{{ msg.reasoning_content }}</pre>
+                      <div class="assistant-think-text markdown-content" v-html="renderMarkdown(msg.reasoning_content)"></div>
                     </details>
-                    <div class="assistant-answer-text">{{ msg.content }}</div>
+                    <div class="assistant-answer-text markdown-content" v-html="renderMarkdown(msg.content)"></div>
                   </template>
                   <template v-else>
-                    {{ msg.content }}
+                    <div class="markdown-content" v-html="renderMarkdown(msg.content)"></div>
                   </template>
                 </div>
               </div>
@@ -495,6 +495,7 @@ import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Promotion } from '@element-plus/icons-vue'
+import { renderMarkdown } from '../utils/markdown'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -1582,6 +1583,150 @@ function handleLogout() {
   min-width: 0;
 }
 
+.markdown-content {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.markdown-content :deep(*) {
+  max-width: 100%;
+}
+
+.markdown-content :deep(p) {
+  margin: 0 0 10px;
+}
+
+.markdown-content :deep(p:last-child),
+.markdown-content :deep(ul:last-child),
+.markdown-content :deep(ol:last-child),
+.markdown-content :deep(pre:last-child),
+.markdown-content :deep(blockquote:last-child),
+.markdown-content :deep(table:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+  margin: 14px 0 8px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.markdown-content :deep(h1:first-child),
+.markdown-content :deep(h2:first-child),
+.markdown-content :deep(h3:first-child),
+.markdown-content :deep(h4:first-child) {
+  margin-top: 0;
+}
+
+.markdown-content :deep(h1) {
+  font-size: 22px;
+}
+
+.markdown-content :deep(h2) {
+  font-size: 19px;
+}
+
+.markdown-content :deep(h3) {
+  font-size: 17px;
+}
+
+.markdown-content :deep(h4) {
+  font-size: 15px;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.markdown-content :deep(li) {
+  margin: 3px 0;
+}
+
+.markdown-content :deep(li > p) {
+  margin: 0;
+}
+
+.markdown-content :deep(a) {
+  color: #0f5fbf;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown-content :deep(blockquote) {
+  margin: 10px 0;
+  padding: 6px 0 6px 12px;
+  border-left: 3px solid #d4d4d4;
+  color: #555;
+}
+
+.markdown-content :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.markdown-content :deep(code) {
+  border-radius: 6px;
+  background: #f1f1f1;
+  padding: 2px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+.markdown-content :deep(pre) {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #171717;
+  color: #f5f5f5;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.markdown-content :deep(pre code) {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.markdown-content :deep(table) {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 10px 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  border: 1px solid #dedede;
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.markdown-content :deep(th) {
+  background: #f3f3f3;
+  font-weight: 700;
+}
+
+.markdown-content :deep(hr) {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid #e5e5e5;
+}
+
 .message-actions {
   display: flex;
   align-items: center;
@@ -1707,7 +1852,7 @@ function handleLogout() {
 .assistant-think-text {
   margin: 0;
   padding: 12px;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   font-size: 13px;
   line-height: 1.7;
@@ -1715,7 +1860,7 @@ function handleLogout() {
 }
 
 .assistant-answer-text {
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
 }
 
