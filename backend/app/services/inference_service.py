@@ -36,6 +36,20 @@ class InferenceService:
             "requires_restart": True,
         },
         {
+            "id": "optimized_weight_loading",
+            "name": "连续权重加载",
+            "description": "启用连续 GPU 权重池和 bulk H2D 拷贝，减少模型冷启动时的大量碎片化 cudaMemcpy/cudaMalloc。",
+            "default_enabled": False,
+            "requires_restart": True,
+        },
+        {
+            "id": "paged_kv_cache",
+            "name": "分页 KV Cache",
+            "description": "将 KV cache 改为按页懒分配，避免模型启动时一次性申请整块 max_seq_len KV 显存，加快冷启动。",
+            "default_enabled": True,
+            "requires_restart": True,
+        },
+        {
             "id": "warmup_on_model_switch",
             "name": "切模预热",
             "description": "切换模型后立即启动常驻进程，减少首条请求的冷启动等待。",
@@ -111,6 +125,8 @@ class InferenceService:
         self.runtime_max_new_tokens = self._load_runtime_max_new_tokens(self.runtime_state_payload)
         self.runtime_temperature = self._load_runtime_temperature(self.runtime_state_payload)
         self.trace_enabled = True
+        self.optimized_weight_loading = False
+        self.paged_kv_cache = True
         self.warmup_on_model_switch = True
         self._apply_engine_options(initializing=True)
         self.max_new_tokens = self._resolved_max_new_tokens(None)
@@ -391,6 +407,8 @@ class InferenceService:
 
     def _apply_engine_options(self, initializing: bool = False, restart_running: bool = False):
         self.trace_enabled = self._engine_option_enabled("trace_enabled")
+        self.optimized_weight_loading = self._engine_option_enabled("optimized_weight_loading")
+        self.paged_kv_cache = self._engine_option_enabled("paged_kv_cache")
         self.warmup_on_model_switch = self._engine_option_enabled("warmup_on_model_switch")
         current_entry = next((item for item in self.available_models if item.get("id") == self.current_model_id), None)
         model_max_new_tokens = current_entry.get("max_new_tokens") if current_entry else None
@@ -442,6 +460,8 @@ class InferenceService:
             "running": self.is_running(),
             "ready": self.is_ready(),
             "trace_enabled": self.trace_enabled,
+            "optimized_weight_loading": self.optimized_weight_loading,
+            "paged_kv_cache": self.paged_kv_cache,
             "warmup_on_model_switch": self.warmup_on_model_switch,
             "max_new_tokens": self.max_new_tokens,
             "default_max_new_tokens": self.default_max_new_tokens,
@@ -1581,6 +1601,8 @@ class InferenceService:
             **os.environ,
             "CUDA_VISIBLE_DEVICES": os.getenv("CUDA_VISIBLE_DEVICES", "0"),
             "KLLM_TRACE_ENABLED": "1" if self.trace_enabled else "0",
+            "KLLM_OPTIMIZED_WEIGHT_LOADING": "1" if self.optimized_weight_loading else "0",
+            "KLLM_PAGED_KV_CACHE": "1" if self.paged_kv_cache else "0",
         }
 
     def _start_engine(self):
@@ -1711,6 +1733,8 @@ class InferenceService:
         print(f"  max_prompt_chars: {self.max_prompt_chars}")
         print(f"  timeout: {self.timeout_seconds}s")
         print(f"  trace_enabled: {self.trace_enabled}")
+        print(f"  optimized_weight_loading: {self.optimized_weight_loading}")
+        print(f"  paged_kv_cache: {self.paged_kv_cache}")
         print(f"  warmup_on_model_switch: {self.warmup_on_model_switch}")
         print("=" * 50)
 
@@ -2174,6 +2198,8 @@ class InferenceService:
             "runtime_options_path": self.runtime_options_path,
             "engine_options": self.list_engine_options(),
             "trace_enabled": self.trace_enabled,
+            "optimized_weight_loading": self.optimized_weight_loading,
+            "paged_kv_cache": self.paged_kv_cache,
             "warmup_on_model_switch": self.warmup_on_model_switch,
             "max_new_tokens": self.max_new_tokens,
             "temperature": self.temperature,

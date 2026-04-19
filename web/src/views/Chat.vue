@@ -98,9 +98,14 @@
                   :show-text="false"
                 />
               </div>
-              <span class="model-loading-inline-text">
-                {{ formatBytes(modelLoadingLoadedBytes) }} / {{ formatBytes(modelLoadingTotalBytes) }}
-              </span>
+              <div class="model-loading-inline-meta">
+                <span class="model-loading-inline-text">
+                  {{ formatBytes(modelLoadingLoadedBytes) }} / {{ formatBytes(modelLoadingTotalBytes) }}
+                </span>
+                <span v-if="modelLoadingStageText" class="model-loading-inline-stage">
+                  {{ modelLoadingStageText }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -531,6 +536,7 @@ const modelLoadingState = computed(() => String(modelLoadingProgress.value?.stat
 const modelLoadingVisible = computed(() => ['starting', 'loading'].includes(modelLoadingState.value))
 const modelLoadingLoadedBytes = computed(() => Number(modelLoadingProgress.value?.loaded_bytes || 0))
 const modelLoadingTotalBytes = computed(() => Number(modelLoadingProgress.value?.total_bytes || 0))
+const modelLoadingStage = computed(() => String(modelLoadingProgress.value?.stage || '').trim())
 const modelLoadingPercentage = computed(() => {
   const raw = Number(modelLoadingProgress.value?.percentage)
   if (Number.isFinite(raw)) {
@@ -541,6 +547,26 @@ const modelLoadingPercentage = computed(() => {
     return 0
   }
   return Math.max(0, Math.min(100, Math.round((modelLoadingLoadedBytes.value / total) * 100)))
+})
+const modelLoadingStageText = computed(() => {
+  const stage = modelLoadingStage.value
+  if (!stage) return ''
+  if (stage === 'start') return '启动加载'
+  if (stage === 'weights.bulk_prepare') return '准备整块权重上传'
+  if (stage === 'weights.bulk_copy') return '整块上传权重到显存'
+  if (stage === 'weights.bulk_outlier') return '补传零散权重'
+  if (stage === 'weights.bulk_fallback') return '回退到逐层权重加载'
+  if (stage === 'weights.done') return '权重上传完成'
+  if (stage === 'buffers.io') return '分配输入缓冲区'
+  if (stage === 'buffers.rope_cache_alloc') return '分配 RoPE 缓存'
+  if (stage === 'buffers.activations') return '分配激活缓冲区'
+  if (stage === 'buffers.key_cache') return '分配 Key Cache'
+  if (stage === 'buffers.value_cache') return '分配 Value Cache'
+  if (stage === 'buffers.attention') return '分配 Attention 缓冲区'
+  if (stage === 'buffers.logits') return '分配输出缓冲区'
+  if (stage === 'buffers.rope_cache_fill') return '初始化 RoPE 缓存'
+  if (stage === 'done' || stage === 'ready') return '模型已就绪'
+  return stage
 })
 const composerStopping = computed(() => chatStore.loading || modelLoadingVisible.value)
 const composerActionTitle = computed(() => {
@@ -1481,9 +1507,22 @@ function handleLogout() {
   flex-shrink: 0;
 }
 
+.model-loading-inline-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
 .model-loading-inline-text {
   color: var(--text-muted);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.model-loading-inline-stage {
+  color: rgba(71, 85, 105, 0.8);
+  font-size: 11px;
   white-space: nowrap;
 }
 

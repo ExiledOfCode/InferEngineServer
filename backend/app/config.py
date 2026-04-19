@@ -41,6 +41,20 @@ class Settings(BaseSettings):
     "requires_restart": true
   },
   {
+    "id": "optimized_weight_loading",
+    "name": "连续权重加载",
+    "description": "启用连续 GPU 权重池和 bulk H2D 拷贝，减少模型冷启动时的大量碎片化 cudaMemcpy/cudaMalloc。",
+    "default_enabled": false,
+    "requires_restart": true
+  },
+  {
+    "id": "paged_kv_cache",
+    "name": "分页 KV Cache",
+    "description": "将 KV cache 改为按页懒分配，避免模型启动时一次性申请整块 max_seq_len KV 显存，加快冷启动。",
+    "default_enabled": true,
+    "requires_restart": true
+  },
+  {
     "id": "warmup_on_model_switch",
     "name": "切模预热",
     "description": "切换模型后立即启动常驻进程，减少首条请求的冷启动等待。",

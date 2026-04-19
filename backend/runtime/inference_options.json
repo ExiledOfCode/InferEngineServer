@@ -1,7 +1,9 @@
 {
-  "updated_at": 1776432082.3745532,
+  "updated_at": 1776573055.4105904,
   "options": {
     "trace_enabled": true,
+    "optimized_weight_loading": true,
+    "paged_kv_cache": true,
     "warmup_on_model_switch": true
   },
   "settings": {

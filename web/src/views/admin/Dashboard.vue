@@ -219,6 +219,8 @@ const inferenceOptions = ref({
   running: false,
   ready: false,
   trace_enabled: true,
+  optimized_weight_loading: false,
+  paged_kv_cache: true,
   warmup_on_model_switch: true,
   max_new_tokens: 128,
   default_max_new_tokens: 128,

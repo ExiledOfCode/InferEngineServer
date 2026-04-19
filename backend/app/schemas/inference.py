@@ -25,6 +25,8 @@ class InferenceEngineOptionsResponse(BaseModel):
     running: bool = False
     ready: bool = False
     trace_enabled: bool = True
+    optimized_weight_loading: bool = False
+    paged_kv_cache: bool = False
     warmup_on_model_switch: bool = True
     max_new_tokens: int = 128
     default_max_new_tokens: int = 128
