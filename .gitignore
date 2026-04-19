@@ -48,3 +48,5 @@ web/dist/
 
 # ===== Backend cache =====
 backend/**/__pycache__/
+
+test/benchmark_reports
