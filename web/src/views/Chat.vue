@@ -90,23 +90,6 @@
             <span v-if="currentModelSeqLenText" class="current-model-context">
               上下文 {{ currentModelSeqLenText }}
             </span>
-            <div v-if="modelLoadingVisible" class="model-loading-inline">
-              <div class="model-loading-inline-bar">
-                <el-progress
-                  :percentage="modelLoadingPercentage"
-                  :stroke-width="6"
-                  :show-text="false"
-                />
-              </div>
-              <div class="model-loading-inline-meta">
-                <span class="model-loading-inline-text">
-                  {{ formatBytes(modelLoadingLoadedBytes) }} / {{ formatBytes(modelLoadingTotalBytes) }}
-                </span>
-                <span v-if="modelLoadingStageText" class="model-loading-inline-stage">
-                  {{ modelLoadingStageText }}
-                </span>
-              </div>
-            </div>
           </div>
         </div>
         <div class="header-actions">
@@ -160,8 +143,7 @@
             v-for="msg in chatStore.messages"
             :key="msg.id"
             class="message-row"
-            :class="[msg.role, { clickable: msg.role === 'assistant' && !!msg.inference_trace }]"
-            @click="handleMessageClick(msg)"
+            :class="[msg.role]"
           >
             <div v-if="msg.role !== 'user'" class="assistant-avatar">
               <el-icon><Monitor /></el-icon>
@@ -182,6 +164,20 @@
                 </div>
               </div>
               <div class="message-actions" @click.stop>
+                <button
+                  v-if="hasMessageTrace(msg)"
+                  class="message-action-btn"
+                  :class="{ active: isMessageTraceActive(msg) }"
+                  type="button"
+                  aria-label="查看埋点"
+                  data-tooltip="埋点"
+                  @click.stop="openMessageTrace(msg)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 12h3l2.2-4.5 3.6 9 2.4-5h5.8"></path>
+                    <circle cx="18" cy="7" r="2"></circle>
+                  </svg>
+                </button>
                 <button
                   class="message-action-btn"
                   type="button"
@@ -531,42 +527,9 @@ const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.curr
 const currentModelSeqLen = computed(() => Number(chatStore.inferenceStatus?.current_model_seq_len || 0))
 const currentModelSeqLenText = computed(() => formatModelSeqLen(currentModelSeqLen.value).replace(/^ · /, ''))
 const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
-const modelLoadingProgress = computed(() => chatStore.inferenceStatus?.model_loading_progress || null)
-const modelLoadingState = computed(() => String(modelLoadingProgress.value?.state || '').toLowerCase())
-const modelLoadingVisible = computed(() => ['starting', 'loading'].includes(modelLoadingState.value))
-const modelLoadingLoadedBytes = computed(() => Number(modelLoadingProgress.value?.loaded_bytes || 0))
-const modelLoadingTotalBytes = computed(() => Number(modelLoadingProgress.value?.total_bytes || 0))
-const modelLoadingStage = computed(() => String(modelLoadingProgress.value?.stage || '').trim())
-const modelLoadingPercentage = computed(() => {
-  const raw = Number(modelLoadingProgress.value?.percentage)
-  if (Number.isFinite(raw)) {
-    return Math.max(0, Math.min(100, Math.round(raw)))
-  }
-  const total = modelLoadingTotalBytes.value
-  if (total <= 0) {
-    return 0
-  }
-  return Math.max(0, Math.min(100, Math.round((modelLoadingLoadedBytes.value / total) * 100)))
-})
-const modelLoadingStageText = computed(() => {
-  const stage = modelLoadingStage.value
-  if (!stage) return ''
-  if (stage === 'start') return '启动加载'
-  if (stage === 'weights.bulk_prepare') return '准备整块权重上传'
-  if (stage === 'weights.bulk_copy') return '整块上传权重到显存'
-  if (stage === 'weights.bulk_outlier') return '补传零散权重'
-  if (stage === 'weights.bulk_fallback') return '回退到逐层权重加载'
-  if (stage === 'weights.done') return '权重上传完成'
-  if (stage === 'buffers.io') return '分配输入缓冲区'
-  if (stage === 'buffers.rope_cache_alloc') return '分配 RoPE 缓存'
-  if (stage === 'buffers.activations') return '分配激活缓冲区'
-  if (stage === 'buffers.key_cache') return '分配 Key Cache'
-  if (stage === 'buffers.value_cache') return '分配 Value Cache'
-  if (stage === 'buffers.attention') return '分配 Attention 缓冲区'
-  if (stage === 'buffers.logits') return '分配输出缓冲区'
-  if (stage === 'buffers.rope_cache_fill') return '初始化 RoPE 缓存'
-  if (stage === 'done' || stage === 'ready') return '模型已就绪'
-  return stage
+const modelLoadingVisible = computed(() => {
+  const state = String(chatStore.inferenceStatus?.model_loading_progress?.state || '').toLowerCase()
+  return ['starting', 'loading'].includes(state)
 })
 const composerStopping = computed(() => chatStore.loading || modelLoadingVisible.value)
 const composerActionTitle = computed(() => {
@@ -704,22 +667,6 @@ function formatDuration(ms) {
   return `${value.toFixed(2)} ms`
 }
 
-function formatBytes(bytes) {
-  const value = Number(bytes)
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0 B'
-  }
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let index = 0
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024
-    index += 1
-  }
-  const digits = index === 0 || size >= 100 ? 0 : 1
-  return `${size.toFixed(digits)} ${units[index]}`
-}
-
 function fallbackCopyText(text) {
   const textarea = document.createElement('textarea')
   textarea.value = text
@@ -760,6 +707,32 @@ function canPersistMessageFeedback(message) {
 
 function isMessageFeedbackActive(message, feedback) {
   return String(message?.feedback || '') === feedback
+}
+
+function hasMessageTrace(message) {
+  return Boolean(message?.role === 'assistant' && message?.inference_trace && typeof message.inference_trace === 'object')
+}
+
+function isMessageTraceActive(message) {
+  if (!hasMessageTrace(message) || !activeTrace.value || typeof activeTrace.value !== 'object') {
+    return false
+  }
+  const currentRequestId = activeTrace.value?.request_id
+  const messageRequestId = message.inference_trace?.request_id
+  if (currentRequestId !== undefined && currentRequestId !== null && messageRequestId !== undefined && messageRequestId !== null) {
+    return String(currentRequestId) === String(messageRequestId)
+  }
+  return activeTrace.value === message.inference_trace
+}
+
+function openMessageTrace(message) {
+  if (!hasMessageTrace(message)) {
+    return
+  }
+  chatStore.inferenceTrace = message.inference_trace
+  if (traceSidebarCollapsed.value) {
+    traceSidebarCollapsed.value = false
+  }
 }
 
 async function handleMessageFeedback(message, feedback) {
@@ -842,12 +815,6 @@ onMounted(async () => {
   } catch (e) {
     ElMessage.warning(formatErrorMessage(e, '无法获取推理状态'))
   }
-  try {
-    await chatStore.fetchInferenceTrace()
-  } catch {
-    // ignore trace init error
-  }
-
   statusTimer = window.setInterval(async () => {
     try {
       await chatStore.fetchInferenceStatus()
@@ -986,18 +953,6 @@ function handleConversationCommand(command, conversation) {
   }
   if (command === 'delete') {
     handleDelete(conversation.id)
-  }
-}
-
-function handleMessageClick(message) {
-  if (!message || message.role !== 'assistant') {
-    return
-  }
-  if (message.inference_trace && typeof message.inference_trace === 'object') {
-    chatStore.inferenceTrace = message.inference_trace
-    if (traceSidebarCollapsed.value) {
-      traceSidebarCollapsed.value = false
-    }
   }
 }
 
@@ -1495,45 +1450,6 @@ function handleLogout() {
   white-space: nowrap;
 }
 
-.model-loading-inline {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.model-loading-inline-bar {
-  width: 150px;
-  flex-shrink: 0;
-}
-
-.model-loading-inline-meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-}
-
-.model-loading-inline-text {
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.model-loading-inline-stage {
-  color: rgba(71, 85, 105, 0.8);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.model-loading-inline :deep(.el-progress-bar__outer) {
-  background-color: #eeeeee;
-}
-
-.model-loading-inline :deep(.el-progress-bar__inner) {
-  background-color: #111111;
-}
-
 .message-list {
   flex: 1;
   min-height: 0;
@@ -1579,26 +1495,6 @@ function handleLogout() {
 
 .message-row.user {
   justify-content: flex-end;
-}
-
-.message-row.clickable {
-  cursor: pointer;
-}
-
-.message-row.clickable .assistant-avatar,
-.message-row.clickable .message-body.assistant {
-  transition: box-shadow 0.22s ease, transform 0.18s ease, border-color 0.22s ease, background 0.22s ease;
-}
-
-.message-row.clickable:hover .assistant-avatar {
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
-}
-
-.message-row.clickable:hover .message-body.assistant {
-  background: #fafafa;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.06);
-  transform: translateY(-1px);
 }
 
 .assistant-avatar {
@@ -2540,14 +2436,6 @@ function handleLogout() {
 
   .current-model-line {
     flex-wrap: wrap;
-  }
-
-  .model-loading-inline {
-    flex-wrap: wrap;
-  }
-
-  .model-loading-inline-bar {
-    width: 120px;
   }
 
   .message-track,

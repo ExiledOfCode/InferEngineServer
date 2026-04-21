@@ -234,6 +234,7 @@ def send_message(
             data.content,
             history,
             think_enabled=data.think_enabled,
+            conversation_id=conversation_id,
         )
     except InferenceCancelledError as exc:
         db.rollback()
