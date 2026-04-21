@@ -110,6 +110,50 @@ class Settings(BaseSettings):
     "max_new_tokens": 256
   },
   {
+    "id": "llama_3_2_1b_instruct_bf16",
+    "name": "Llama-3.2-1B-Instruct-BF16",
+    "family": "llama3",
+    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Llama-3.2-1B-Instruct",
+    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Llama-3.2-1B-Instruct/Llama-3.2-1B-Instruct-bf16.bin",
+    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Llama-3.2-1B-Instruct/tokenizer.json",
+    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/llama3_infer",
+    "prompt_format": "llama3",
+    "max_new_tokens": 256
+  },
+  {
+    "id": "tinyllama_1_1b_chat_v1_0_bf16",
+    "name": "TinyLlama-1.1B-Chat-v1.0-BF16",
+    "family": "tinyllama",
+    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/TinyLlama-1.1B-Chat-v1.0",
+    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/TinyLlama-1.1B-Chat-v1.0/TinyLlama-1.1B-Chat-v1.0-bf16.bin",
+    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/TinyLlama-1.1B-Chat-v1.0/tokenizer.model",
+    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/tinyllama_infer",
+    "prompt_format": "tinyllama",
+    "max_new_tokens": 256
+  },
+  {
+    "id": "smollm2_1_7b_instruct_bf16",
+    "name": "SmolLM2-1.7B-Instruct-BF16",
+    "family": "smollm",
+    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/SmolLM2-1.7B-Instruct",
+    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/SmolLM2-1.7B-Instruct/SmolLM2-1.7B-Instruct-bf16.bin",
+    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/SmolLM2-1.7B-Instruct/tokenizer.json",
+    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/smollm_infer",
+    "prompt_format": "chatml",
+    "max_new_tokens": 256
+  },
+  {
+    "id": "deepseek_r1_distill_qwen_1_5b_bf16",
+    "name": "DeepSeek-R1-Distill-Qwen-1.5B-BF16",
+    "family": "deepseek_qwen",
+    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/DeepSeek-R1-Distill-Qwen-1.5B",
+    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/DeepSeek-R1-Distill-Qwen-1.5B/DeepSeek-R1-Distill-Qwen-1.5B-bf16.bin",
+    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer.json",
+    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/demo/deepseek_qwen_infer.py",
+    "prompt_format": "deepseek",
+    "max_new_tokens": 256
+  },
+  {
     "id": "qwen2_0_5b",
     "name": "Qwen2.5-0.5B",
     "family": "qwen2",

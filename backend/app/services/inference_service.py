@@ -183,7 +183,7 @@ class InferenceService:
     @staticmethod
     def _read_prompt_format(env_name: str, default: str) -> str:
         raw = str(os.getenv(env_name, default)).strip().lower()
-        return raw if raw in {"raw", "chatml", "auto"} else default
+        return raw if raw in {"raw", "chatml", "deepseek", "llama3", "tinyllama", "auto"} else default
 
     @staticmethod
     def _coerce_positive_int(value: Any, default: int) -> int:
@@ -321,9 +321,26 @@ class InferenceService:
         return [catalog[option_id] for option_id in order]
 
     @classmethod
-    def _clamp_max_new_tokens(cls, value: Any, default: int) -> int:
+    def _max_new_tokens_cap_from_seq_len(cls, seq_len: Any) -> Optional[int]:
+        try:
+            parsed = int(seq_len)
+        except Exception:
+            return None
+        if parsed <= 1:
+            return None
+        return parsed - 1
+
+    def _current_max_new_tokens_cap(self) -> Optional[int]:
+        return self._max_new_tokens_cap_from_seq_len(self.current_model_seq_len)
+
+    @classmethod
+    def _clamp_max_new_tokens(cls, value: Any, default: int, max_allowed: Optional[int] = None) -> int:
         parsed = cls._coerce_positive_int(value, default)
-        return max(cls.MIN_MAX_NEW_TOKENS, parsed)
+        parsed = max(cls.MIN_MAX_NEW_TOKENS, parsed)
+        if max_allowed is not None and max_allowed > 0:
+            parsed = min(parsed, max_allowed)
+            parsed = max(1, parsed)
+        return parsed
 
     def _load_engine_option_values(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
         values = {
@@ -364,9 +381,12 @@ class InferenceService:
         return self._clamp_temperature(raw_value, self.default_temperature)
 
     def _resolved_max_new_tokens(self, model_value: Any) -> int:
-        base_value = self._clamp_max_new_tokens(model_value, self.default_max_new_tokens)
+        max_allowed = self._current_max_new_tokens_cap()
+        base_value = self._clamp_max_new_tokens(model_value, self.default_max_new_tokens, max_allowed)
         if self.runtime_max_new_tokens is not None:
-            return self._clamp_max_new_tokens(self.runtime_max_new_tokens, base_value)
+            if self.current_model_seq_len and self.runtime_max_new_tokens >= self.current_model_seq_len:
+                return base_value
+            return self._clamp_max_new_tokens(self.runtime_max_new_tokens, base_value, max_allowed)
         return base_value
 
     def _resolved_temperature(self, model_value: Any) -> float:
@@ -374,6 +394,15 @@ class InferenceService:
         if self.runtime_temperature is not None:
             return self._clamp_temperature(self.runtime_temperature, base_value)
         return base_value
+
+    def _sync_runtime_max_new_tokens(self) -> bool:
+        if self.runtime_max_new_tokens is None:
+            return False
+        normalized = self.max_new_tokens
+        if self.runtime_max_new_tokens == normalized:
+            return False
+        self.runtime_max_new_tokens = normalized
+        return True
 
     def _persist_engine_option_values(self):
         path = self.runtime_options_path
@@ -465,7 +494,7 @@ class InferenceService:
             "max_new_tokens": self.max_new_tokens,
             "default_max_new_tokens": self.default_max_new_tokens,
             "min_max_new_tokens": self.MIN_MAX_NEW_TOKENS,
-            "max_max_new_tokens": self.MAX_MAX_NEW_TOKENS,
+            "max_max_new_tokens": self._current_max_new_tokens_cap() or self.MAX_MAX_NEW_TOKENS,
             "temperature": self.temperature,
             "default_temperature": self.default_temperature,
             "min_temperature": self.MIN_TEMPERATURE,
@@ -516,7 +545,9 @@ class InferenceService:
 
         restart_required = False
         if max_new_tokens is not None:
-            next_value = self._clamp_max_new_tokens(max_new_tokens, self.default_max_new_tokens)
+            next_value = self._clamp_max_new_tokens(
+                max_new_tokens, self.default_max_new_tokens, self._current_max_new_tokens_cap()
+            )
             current_value = self.max_new_tokens
             self.runtime_max_new_tokens = next_value
             self.max_new_tokens = next_value
@@ -754,8 +785,21 @@ class InferenceService:
         }
 
     def _effective_prompt_format(self) -> str:
-        if self.prompt_format in {"raw", "chatml"}:
+        if self.current_model_family == "deepseek_qwen" and self.prompt_format != "raw":
+            return "deepseek"
+
+        if self.prompt_format in {"raw", "chatml", "deepseek", "llama3", "tinyllama"}:
             return self.prompt_format
+
+        if self.current_model_family == "llama3":
+            return "llama3"
+        if self.current_model_family == "tinyllama":
+            return "tinyllama"
+        if self.current_model_family == "smollm":
+            return "chatml"
+
+        if self.current_model_family in {"llama", "deepseek_llama"}:
+            return "raw"
 
         model_hint = " ".join(
             [
@@ -765,7 +809,9 @@ class InferenceService:
                 os.path.basename(os.path.dirname(self.model_path or "")),
             ]
         ).lower()
-        if any(key in model_hint for key in ("instruct", "chat", "qwen")):
+        if any(key in model_hint for key in ("qwen", "deepseek")):
+            return "chatml"
+        if any(key in model_hint for key in ("instruct", "chat")):
             return "chatml"
         return "raw"
 
@@ -1046,6 +1092,12 @@ class InferenceService:
             return "spe"
         return None
 
+    def _supports_paged_kv_cache(self) -> bool:
+        return self.current_model_family in {"qwen2", "qwen3", "deepseek_qwen"}
+
+    def _supports_optimized_weight_loading(self) -> bool:
+        return self.current_model_family in {"qwen2", "qwen3"}
+
     def _resolve_existing_path(self, raw_path: str, expect: str) -> Optional[str]:
         value = str(raw_path or "").strip()
         if not value:
@@ -1106,9 +1158,9 @@ class InferenceService:
             full_path = os.path.join(dir_path, name)
             if not os.path.isfile(full_path):
                 continue
-            if name == "tokenizer.json" or (name.endswith(".json") and "tokenizer" in name.lower()):
+            if name.endswith(".model"):
                 tokenizer_file = full_path
-                tokenizer_type = "bpe"
+                tokenizer_type = "spe"
                 break
 
         if tokenizer_file is None:
@@ -1116,9 +1168,9 @@ class InferenceService:
                 full_path = os.path.join(dir_path, name)
                 if not os.path.isfile(full_path):
                     continue
-                if name.endswith(".model"):
+                if name == "tokenizer.json" or (name.endswith(".json") and "tokenizer" in name.lower()):
                     tokenizer_file = full_path
-                    tokenizer_type = "spe"
+                    tokenizer_type = "bpe"
                     break
 
         for name in files:
@@ -1166,20 +1218,46 @@ class InferenceService:
     @staticmethod
     def _infer_model_family(*hints: Any) -> str:
         text = " ".join(str(item or "") for item in hints).lower()
+        if "deepseek" in text and "qwen" in text:
+            return "deepseek_qwen"
+        if "deepseek" in text and "llama" in text:
+            return "deepseek_llama"
+        if "llama-3" in text or "llama 3" in text or "llama3" in text:
+            return "llama3"
         if "qwen3" in text:
             return "qwen3"
         if "qwen2" in text or "qwen2.5" in text:
             return "qwen2"
         if "qwen" in text:
             return "qwen2"
+        if "tinyllama" in text:
+            return "tinyllama"
+        if "smollm" in text:
+            return "smollm"
+        if "llama" in text:
+            return "llama"
         return "unknown"
 
     def _default_executable_name(self, family: str) -> str:
         if family == "qwen3":
             return "qwen3_infer"
+        if family == "llama3":
+            return "llama3_infer"
+        if family == "tinyllama":
+            return "tinyllama_infer"
+        if family == "smollm":
+            return "smollm_infer"
+        if family == "deepseek_qwen":
+            return "deepseek_qwen_infer"
+        if family == "deepseek_llama":
+            return "deepseek_llama_infer"
+        if family == "llama":
+            return "llama_infer"
         return "qwen_infer"
 
     def _default_executable_path(self, family: str) -> str:
+        if family == "deepseek_qwen":
+            return os.path.join(self.engine_path, "demo", "deepseek_qwen_infer.py")
         return os.path.join(self.engine_path, "build", "demo", self._default_executable_name(family))
 
     def _resolve_model_entry(self, raw_entry: Dict[str, Any], source: str) -> Optional[Dict[str, Any]]:
@@ -1382,9 +1460,13 @@ class InferenceService:
             score += 300
         elif family == "qwen3":
             score += 260
+        elif family in {"deepseek_qwen", "llama", "llama3", "tinyllama", "smollm", "deepseek_llama"}:
+            score += 220
         tokenizer_type = entry.get("tokenizer_type")
         if tokenizer_type == "bpe":
             score += 60
+        elif tokenizer_type == "spe":
+            score += 40
         name = str(entry.get("name") or "").lower()
         if "instruct" in name or "chat" in name:
             score += 20
@@ -1487,10 +1569,17 @@ class InferenceService:
 
         self.max_new_tokens = self._resolved_max_new_tokens(entry.get("max_new_tokens"))
         self.temperature = self._resolved_temperature(entry.get("temperature"))
+        runtime_settings_changed = self._sync_runtime_max_new_tokens()
         prompt_format = str(entry.get("prompt_format") or self.default_prompt_format).strip().lower()
-        self.prompt_format = prompt_format if prompt_format in {"raw", "chatml", "auto"} else self.default_prompt_format
+        self.prompt_format = (
+            prompt_format
+            if prompt_format in {"raw", "chatml", "deepseek", "llama3", "tinyllama", "auto"}
+            else self.default_prompt_format
+        )
         self.raw_with_history = self._coerce_bool(entry.get("raw_with_history"), self.default_raw_with_history)
         self.system_prompt = str(entry.get("system_prompt") or self.default_system_prompt).strip() or self.default_system_prompt
+        if runtime_settings_changed:
+            self._persist_engine_option_values()
 
     def _public_model_info(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         executable = entry.get("executable")
@@ -1541,12 +1630,14 @@ class InferenceService:
         return self.debug_status()
 
     def _process_env(self) -> Dict[str, str]:
+        paged_kv_cache_enabled = self.paged_kv_cache and self._supports_paged_kv_cache()
+        optimized_weight_loading = self.optimized_weight_loading and self._supports_optimized_weight_loading()
         return {
             **os.environ,
             "CUDA_VISIBLE_DEVICES": os.getenv("CUDA_VISIBLE_DEVICES", "0"),
             "KLLM_TRACE_ENABLED": "1" if self.trace_enabled else "0",
-            "KLLM_OPTIMIZED_WEIGHT_LOADING": "1" if self.optimized_weight_loading else "0",
-            "KLLM_PAGED_KV_CACHE": "1" if self.paged_kv_cache else "0",
+            "KLLM_OPTIMIZED_WEIGHT_LOADING": "1" if optimized_weight_loading else "0",
+            "KLLM_PAGED_KV_CACHE": "1" if paged_kv_cache_enabled else "0",
         }
 
     def _start_engine(self):
@@ -1723,7 +1814,7 @@ class InferenceService:
                 self.executable,
                 self.model_path,
                 self.tokenizer_path,
-                self.tokenizer_type == "bpe",
+                self.tokenizer_type in {"bpe", "spe"},
                 os.path.exists(self.executable) if self.executable else False,
                 os.path.exists(self.model_path) if self.model_path else False,
                 os.path.exists(self.tokenizer_path) if self.tokenizer_path else False,
@@ -1809,7 +1900,44 @@ class InferenceService:
         effective_prompt_format = self._effective_prompt_format()
         if effective_prompt_format == "raw":
             return self._build_raw_prompt(prompt, history)
+        if effective_prompt_format == "llama3":
+            return self._build_llama3_prompt(prompt, history)
+        if effective_prompt_format == "tinyllama":
+            return self._build_tinyllama_prompt(prompt, history)
+        if effective_prompt_format == "deepseek":
+            return self._build_deepseek_prompt(prompt, history, think_enabled=think_enabled)
         return self._build_chatml_prompt(prompt, history, think_enabled=think_enabled)
+
+    def _collect_structured_messages(
+        self,
+        prompt: str,
+        history: List[Dict],
+        default_system_prompt: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        messages: List[Dict[str, str]] = []
+        for message in history[-self.max_history_messages :]:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "")).strip().lower()
+            content = message.get("content", "")
+            if role not in {"system", "user", "assistant"}:
+                continue
+            if not isinstance(content, str):
+                content = str(content)
+            content = self._history_safe_content(role, content)
+            if not content:
+                continue
+            messages.append({"role": role, "content": content})
+
+        if not messages or messages[-1]["role"] != "user":
+            clean_prompt = prompt.strip()
+            if clean_prompt:
+                messages.append({"role": "user", "content": clean_prompt})
+
+        if default_system_prompt and not any(message["role"] == "system" for message in messages):
+            messages.insert(0, {"role": "system", "content": default_system_prompt})
+
+        return self._truncate_messages_by_chars(messages)
 
     def _build_raw_prompt(self, prompt: str, history: List[Dict]) -> str:
         clean_prompt = (prompt or "").strip()
@@ -1844,30 +1972,7 @@ class InferenceService:
         return "\n".join(parts).strip()
 
     def _build_chatml_prompt(self, prompt: str, history: List[Dict], think_enabled: bool = True) -> str:
-        messages: List[Dict[str, str]] = []
-        for message in history[-self.max_history_messages :]:
-            if not isinstance(message, dict):
-                continue
-            role = str(message.get("role", "")).strip().lower()
-            content = message.get("content", "")
-            if role not in {"system", "user", "assistant"}:
-                continue
-            if not isinstance(content, str):
-                content = str(content)
-            content = self._history_safe_content(role, content)
-            if not content:
-                continue
-            messages.append({"role": role, "content": content})
-
-        if not messages or messages[-1]["role"] != "user":
-            clean_prompt = prompt.strip()
-            if clean_prompt:
-                messages.append({"role": "user", "content": clean_prompt})
-
-        if not any(message["role"] == "system" for message in messages):
-            messages.insert(0, {"role": "system", "content": self.system_prompt})
-
-        messages = self._truncate_messages_by_chars(messages)
+        messages = self._collect_structured_messages(prompt, history, default_system_prompt=self.system_prompt)
 
         parts = []
         for message in messages:
@@ -1877,6 +1982,55 @@ class InferenceService:
         else:
             parts.append("<|im_start|>assistant\n")
         return "\n".join(parts)
+
+    def _build_llama3_prompt(self, prompt: str, history: List[Dict]) -> str:
+        messages = self._collect_structured_messages(prompt, history, default_system_prompt=self.system_prompt)
+        parts = ["<|begin_of_text|>"]
+        for message in messages:
+            parts.append(
+                f"<|start_header_id|>{message['role']}<|end_header_id|>\n\n"
+                f"{message['content']}<|eot_id|>"
+            )
+        parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        return "".join(parts)
+
+    def _build_tinyllama_prompt(self, prompt: str, history: List[Dict]) -> str:
+        messages = self._collect_structured_messages(prompt, history, default_system_prompt=self.system_prompt)
+        role_tokens = {
+            "system": "<|system|>",
+            "user": "<|user|>",
+            "assistant": "<|assistant|>",
+        }
+        parts = []
+        for message in messages:
+            role_token = role_tokens.get(message["role"])
+            if not role_token:
+                continue
+            parts.append(f"{role_token}\n{message['content']}</s>")
+        parts.append("<|assistant|>")
+        return "\n".join(parts)
+
+    def _build_deepseek_prompt(self, prompt: str, history: List[Dict], think_enabled: bool = True) -> str:
+        messages = self._collect_structured_messages(prompt, history, default_system_prompt=self.system_prompt)
+        system_text = next(
+            (message["content"] for message in messages if message["role"] == "system"),
+            self.system_prompt,
+        )
+
+        parts = ["<｜begin▁of▁sentence｜>", system_text]
+        for message in messages:
+            if message["role"] == "system":
+                continue
+            if message["role"] == "user":
+                parts.append(f"<｜User｜>{message['content']}")
+            elif message["role"] == "assistant":
+                parts.append(f"<｜Assistant｜>{message['content']}<｜end▁of▁sentence｜>")
+
+        if think_enabled:
+            parts.append("<｜Assistant｜><think>\n")
+        else:
+            parts.append("<｜Assistant｜>")
+        return "".join(parts)
 
     def _truncate_messages_by_chars(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         if not messages or self.max_prompt_chars <= 0:
