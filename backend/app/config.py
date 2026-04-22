@@ -1,5 +1,14 @@
-from pydantic_settings import BaseSettings
+import json
 from typing import Optional
+
+from pydantic_settings import BaseSettings
+
+from .config_defaults import DEFAULT_INFERENCE_ENGINE_OPTIONS, DEFAULT_INFERENCE_MODELS
+
+
+def _dump_default_json(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
 
 class Settings(BaseSettings):
     # 数据库配置
@@ -9,178 +18,37 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "123456"
     DB_NAME: str = "ai_chat"
     SQL_ECHO: bool = False
-    
-    # JWT配置
+
+    # JWT 配置
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
-    
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+
     # 推理引擎配置
     INFERENCE_ENGINE_PATH: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama"
-    # 可选：指定模型目录（绝对路径，或相对 INFERENCE_ENGINE_PATH/models 的目录名）
     INFERENCE_MODEL_DIR: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-1.5B-Instruct"
-    # INFERENCE_MODEL_DIR: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B"
-    # 可选：指定模型文件（绝对路径，或相对 INFERENCE_ENGINE_PATH/models 的路径）
     INFERENCE_MODEL_PATH: str = ""
-    # 可选：指定 tokenizer 文件（绝对路径，或相对 INFERENCE_ENGINE_PATH/models 的路径）
     INFERENCE_TOKENIZER_PATH: str = ""
-    # 可选：默认模型 ID。配合 INFERENCE_MODELS_JSON 使用。
     INFERENCE_DEFAULT_MODEL_ID: str = "qwen2_5_1_5b_instruct"
-    # 可选：默认 temperature。0 表示贪心解码，>0 时启用 GPU 概率采样。
     INFERENCE_TEMPERATURE: float = 0.0
-    # 可选：运行时优化开关持久化文件。相对路径按 backend 目录解析。
     INFERENCE_RUNTIME_OPTIONS_PATH: str = "runtime/inference_options.json"
-    # 可选：引擎优化项默认配置。支持后续继续扩展新选项。
-    INFERENCE_ENGINE_OPTIONS_JSON: str = """
-[
-  {
-    "id": "trace_enabled",
-    "name": "数据埋点",
-    "description": "控制引擎阶段埋点与算子 profiling，关闭后更接近纯推理速度。",
-    "default_enabled": true,
-    "requires_restart": true
-  },
-  {
-    "id": "optimized_weight_loading",
-    "name": "连续权重加载",
-    "description": "启用连续 GPU 权重池和 bulk H2D 拷贝，减少模型冷启动时的大量碎片化 cudaMemcpy/cudaMalloc。",
-    "default_enabled": false,
-    "requires_restart": true
-  },
-  {
-    "id": "paged_kv_cache",
-    "name": "分页 KV Cache",
-    "description": "将 KV cache 改为按页懒分配，避免模型启动时一次性申请整块 max_seq_len KV 显存，加快冷启动。",
-    "default_enabled": true,
-    "requires_restart": true
-  },
-  {
-    "id": "warmup_on_model_switch",
-    "name": "切模预热",
-    "description": "切换模型后立即启动常驻进程，减少首条请求的冷启动等待。",
-    "default_enabled": true,
-    "requires_restart": false
-  }
-]
-"""
-    # 可选：多模型配置，JSON 数组或 {"models": [...]}。
-    INFERENCE_MODELS_JSON: str = """
-[
-  {
-    "id": "qwen2_5_1_5b_instruct",
-    "name": "Qwen2.5-1.5B-Instruct",
-    "family": "qwen2",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-1.5B-Instruct",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-1.5B-Instruct/Qwen2.5-1.5B-Instruct.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-1.5B-Instruct/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen_infer",
-    "prompt_format": "chatml"
-  },
-  {
-    "id": "qwen3_1_7b",
-    "name": "Qwen3-1.7B",
-    "family": "qwen3",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B/Qwen3-1.7B.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen3_infer",
-    "prompt_format": "chatml",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "qwen3_1_7b_bf16",
-    "name": "Qwen3-1.7B-BF16",
-    "family": "qwen3",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B/Qwen3-1.7B-bf16.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-1.7B/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen3_infer",
-    "prompt_format": "chatml",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "qwen3_0_6b",
-    "name": "Qwen3-0.6B",
-    "family": "qwen3",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-0.6B",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-0.6B/Qwen3-0.6B.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-0.6B/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen3_infer",
-    "prompt_format": "chatml",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "llama_3_2_1b_instruct_bf16",
-    "name": "Llama-3.2-1B-Instruct-BF16",
-    "family": "llama3",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Llama-3.2-1B-Instruct",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Llama-3.2-1B-Instruct/Llama-3.2-1B-Instruct-bf16.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Llama-3.2-1B-Instruct/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/llama3_infer",
-    "prompt_format": "llama3",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "tinyllama_1_1b_chat_v1_0_bf16",
-    "name": "TinyLlama-1.1B-Chat-v1.0-BF16",
-    "family": "tinyllama",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/TinyLlama-1.1B-Chat-v1.0",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/TinyLlama-1.1B-Chat-v1.0/TinyLlama-1.1B-Chat-v1.0-bf16.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/TinyLlama-1.1B-Chat-v1.0/tokenizer.model",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/tinyllama_infer",
-    "prompt_format": "tinyllama",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "smollm2_1_7b_instruct_bf16",
-    "name": "SmolLM2-1.7B-Instruct-BF16",
-    "family": "smollm",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/SmolLM2-1.7B-Instruct",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/SmolLM2-1.7B-Instruct/SmolLM2-1.7B-Instruct-bf16.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/SmolLM2-1.7B-Instruct/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/smollm_infer",
-    "prompt_format": "chatml",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "deepseek_r1_distill_qwen_1_5b_bf16",
-    "name": "DeepSeek-R1-Distill-Qwen-1.5B-BF16",
-    "family": "deepseek_qwen",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/DeepSeek-R1-Distill-Qwen-1.5B",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/DeepSeek-R1-Distill-Qwen-1.5B/DeepSeek-R1-Distill-Qwen-1.5B-bf16.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/demo/deepseek_qwen_infer.py",
-    "prompt_format": "deepseek",
-    "max_new_tokens": 256
-  },
-  {
-    "id": "qwen2_0_5b",
-    "name": "Qwen2.5-0.5B",
-    "family": "qwen2",
-    "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B",
-    "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B/Qwen2.5-0.5B.bin",
-    "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen2.5-0.5B/tokenizer.json",
-    "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen_infer",
-    "prompt_format": "chatml"
-  }
-]
-"""
+    INFERENCE_ENGINE_OPTIONS_JSON: str = _dump_default_json(DEFAULT_INFERENCE_ENGINE_OPTIONS)
+    INFERENCE_MODELS_JSON: str = _dump_default_json(DEFAULT_INFERENCE_MODELS)
 
-    # CORS 配置（逗号分隔）
+    # CORS 配置
     CORS_ALLOW_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173"
-    # 可选：正则匹配 Origin（适合本地开发多端口场景）
     CORS_ALLOW_ORIGIN_REGEX: str = r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.\d+\.\d+)(:\d+)?$"
-    # 默认压制前端轮询接口的 access log，避免掩盖真正的异常信息
+
+    # 默认压制前端轮询接口的 access log
     SUPPRESSED_ACCESS_LOG_PATHS: str = "/api/inference/status"
-    
+
     @property
     def DATABASE_URL(self) -> str:
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @property
     def CORS_ORIGINS(self) -> list[str]:
-        origins = [item.strip() for item in self.CORS_ALLOW_ORIGINS.split(",") if item.strip()]
-        return origins
+        return [item.strip() for item in self.CORS_ALLOW_ORIGINS.split(",") if item.strip()]
 
     @property
     def CORS_ORIGIN_REGEX(self) -> Optional[str]:
@@ -194,8 +62,9 @@ class Settings(BaseSettings):
             for item in self.SUPPRESSED_ACCESS_LOG_PATHS.split(",")
             if item.strip()
         }
-    
+
     class Config:
         env_file = ".env"
+
 
 settings = Settings()

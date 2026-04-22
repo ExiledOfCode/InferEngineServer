@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 import time
@@ -15,6 +16,10 @@ from ..utils.security import get_current_chat_user
 from ..services.inference_service import InferenceCancelledError, inference_service
 
 router = APIRouter()
+
+
+def encode_sse(event: str, payload) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def build_message_response(message: Message, trace_payload=None) -> MessageResponse:
@@ -35,6 +40,66 @@ def build_message_response(message: Message, trace_payload=None) -> MessageRespo
         feedback=feedback,
         created_at=message.created_at,
     )
+
+
+def save_assistant_message(
+    db: Session,
+    *,
+    conversation_id: int,
+    content: str,
+    reasoning_content: str | None,
+    raw_content: str | None,
+    trace_payload,
+) -> tuple[Message, object | None]:
+    serialized_trace = json.dumps(trace_payload, ensure_ascii=False) if trace_payload else None
+    assistant_message = Message(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=content,
+        reasoning_content=reasoning_content,
+        raw_content=raw_content,
+        inference_trace=serialized_trace,
+    )
+    db.add(assistant_message)
+    try:
+        db.commit()
+        db.refresh(assistant_message)
+        return assistant_message, trace_payload
+    except Exception as exc:
+        db.rollback()
+        print(f"[Chat] 保存 assistant 埋点失败，降级为仅保存回答内容: {exc}")
+
+    fallback_message = Message(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=content,
+        reasoning_content=reasoning_content,
+        raw_content=raw_content,
+        inference_trace=None,
+    )
+    db.add(fallback_message)
+    db.commit()
+    db.refresh(fallback_message)
+    return fallback_message, None
+
+
+def build_streaming_message_payload(
+    conversation_id: int,
+    *,
+    content: str,
+    reasoning_content: str | None,
+    raw_content: str | None,
+):
+    return {
+        "id": f"stream-{conversation_id}",
+        "conversation_id": conversation_id,
+        "role": "assistant",
+        "content": content,
+        "reasoning_content": reasoning_content,
+        "raw_content": raw_content,
+        "created_at": datetime.utcnow().isoformat(),
+        "pending": True,
+    }
 
 @router.get("/inference/status")
 def get_inference_status(current_user: User = Depends(get_current_chat_user)):
@@ -168,6 +233,130 @@ def get_messages(
     return [build_message_response(msg) for msg in messages]
 
 
+@router.post("/conversations/{conversation_id}/messages/stream")
+def stream_message(
+    conversation_id: int,
+    data: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_chat_user),
+):
+    """发送消息并以 SSE 方式实时推送 AI 回复。"""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    user_message = Message(
+        conversation_id=conversation_id,
+        role="user",
+        content=data.content,
+    )
+    db.add(user_message)
+    db.commit()
+    db.refresh(user_message)
+
+    history_messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id
+    ).order_by(Message.created_at.asc()).all()
+
+    history = [{"role": msg.role, "content": msg.content} for msg in history_messages]
+    if len(history) <= 1:
+        conversation.title = data.content[:50] + ("..." if len(data.content) > 50 else "")
+        db.commit()
+
+    def event_stream():
+        live_raw_response = ""
+        infer_start = time.monotonic()
+
+        try:
+            for event in inference_service.generate_stream(
+                data.content,
+                history,
+                think_enabled=data.think_enabled,
+                conversation_id=conversation_id,
+            ):
+                event_type = str(event.get("type") or "").strip().lower()
+                if event_type == "delta":
+                    live_raw_response = str(event.get("raw_response") or "")
+                    parsed_live = inference_service.parse_streaming_assistant_response(live_raw_response)
+                    payload = {
+                        "message": build_streaming_message_payload(
+                            conversation_id,
+                            content=str(parsed_live.get("content") or ""),
+                            reasoning_content=parsed_live.get("reasoning_content"),
+                            raw_content=parsed_live.get("raw_content"),
+                        )
+                    }
+                    yield encode_sse("delta", payload)
+                    continue
+
+                if event_type != "done":
+                    continue
+
+                ai_raw_response = str(event.get("response") or live_raw_response or "")
+                parsed_response = inference_service.parse_assistant_response(ai_raw_response)
+                ai_response = parsed_response.get("content") or "（模型未生成有效回复）"
+                if not ai_response.strip():
+                    ai_response = "（模型未生成有效回复）"
+                infer_elapsed = time.monotonic() - infer_start
+                print(
+                    f"[ChatStream] conversation={conversation_id} user={current_user.id} "
+                    f"infer_elapsed={infer_elapsed:.2f}s response_chars={len(ai_response)}"
+                )
+
+                trace_payload = inference_service.trace_status()
+                persist_start = time.monotonic()
+                assistant_message, stored_trace_payload = save_assistant_message(
+                    db,
+                    conversation_id=conversation_id,
+                    content=ai_response,
+                    reasoning_content=parsed_response.get("reasoning_content"),
+                    raw_content=parsed_response.get("raw_content"),
+                    trace_payload=trace_payload,
+                )
+                persist_elapsed = time.monotonic() - persist_start
+                print(
+                    f"[ChatStream] conversation={conversation_id} user={current_user.id} "
+                    f"persist_elapsed={persist_elapsed:.2f}s trace_saved={bool(stored_trace_payload)}"
+                )
+                message_payload = build_message_response(
+                    assistant_message,
+                    stored_trace_payload,
+                ).model_dump(mode="json")
+                yield encode_sse(
+                    "done",
+                    {
+                        "message": message_payload,
+                        "inference_trace": stored_trace_payload,
+                    },
+                )
+                return
+
+            # 正常情况下 generate_stream 一定会发出 done，这里做兜底。
+            raise RuntimeError("流式推理未返回完成事件。")
+        except InferenceCancelledError as exc:
+            db.rollback()
+            yield encode_sse("cancelled", {"detail": str(exc)})
+        except Exception as exc:
+            db.rollback()
+            detail = f"推理异常: {exc}"
+            print(f"[ChatStream] conversation={conversation_id} user={current_user.id} error={detail}")
+            yield encode_sse("error", {"detail": detail})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.put("/messages/{message_id}/feedback", response_model=MessageResponse)
 def update_message_feedback(
     message_id: int,
@@ -253,17 +442,19 @@ def send_message(
     
     # 保存AI回复
     trace_payload = inference_service.trace_status()
-    assistant_message = Message(
+    persist_start = time.monotonic()
+    assistant_message, stored_trace_payload = save_assistant_message(
+        db,
         conversation_id=conversation_id,
-        role="assistant",
         content=ai_response,
         reasoning_content=parsed_response.get("reasoning_content"),
         raw_content=parsed_response.get("raw_content"),
-        inference_trace=json.dumps(trace_payload, ensure_ascii=False) if trace_payload else None,
+        trace_payload=trace_payload,
     )
-    db.add(assistant_message)
-    
-    db.commit()
-    db.refresh(assistant_message)
-    
-    return MessageWithTraceResponse(**build_message_response(assistant_message, trace_payload).model_dump())
+    persist_elapsed = time.monotonic() - persist_start
+    print(
+        f"[Chat] conversation={conversation_id} user={current_user.id} "
+        f"persist_elapsed={persist_elapsed:.2f}s trace_saved={bool(stored_trace_payload)}"
+    )
+
+    return MessageWithTraceResponse(**build_message_response(assistant_message, stored_trace_payload).model_dump())
