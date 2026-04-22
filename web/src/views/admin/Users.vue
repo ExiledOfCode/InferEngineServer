@@ -1,81 +1,45 @@
 <template>
-  <div class="admin-shell">
-    <aside class="admin-sidebar">
-      <div class="sidebar-brand">
-        <div class="brand-mark">江</div>
-        <div class="brand-text">
-          <h1>自研推理引擎对话平台</h1>
-          <p>管理控制台</p>
-        </div>
+  <AdminShell active-view="users">
+    <header class="admin-header">
+      <div>
+        <h2>用户管理</h2>
+        <p>创建、启用、禁用或重置普通用户账号。</p>
       </div>
+      <el-button class="create-btn" type="primary" @click="showCreate">
+        <el-icon><Plus /></el-icon>
+        <span>创建用户</span>
+      </el-button>
+    </header>
 
-      <nav class="sidebar-nav">
-        <button class="nav-item" @click="router.push('/admin/dashboard')">
-          <el-icon><DataAnalysis /></el-icon>
-          <span>仪表盘</span>
-        </button>
-        <button class="nav-item active" @click="router.push('/admin/users')">
-          <el-icon><User /></el-icon>
-          <span>用户管理</span>
-        </button>
-      </nav>
-
-      <div class="sidebar-foot">
-        <div class="admin-meta">
-          <div class="avatar">{{ (authStore.user?.username || 'A').slice(0, 1).toUpperCase() }}</div>
-          <div class="meta-text">
-            <span class="name">{{ authStore.user?.username }}</span>
-            <span class="role">Administrator</span>
-          </div>
-        </div>
-        <button class="logout-btn" @click="handleLogout">
-          <el-icon><SwitchButton /></el-icon>
-        </button>
-      </div>
-    </aside>
-
-    <section class="admin-main">
-      <header class="admin-header">
-        <div>
-          <h2>用户管理</h2>
-          <p>创建、启用、禁用或重置普通用户账号。</p>
-        </div>
-        <el-button class="create-btn" type="primary" @click="showCreate">
-          <el-icon><Plus /></el-icon>
-          <span>创建用户</span>
-        </el-button>
-      </header>
-
-      <div class="table-card">
-        <el-table :data="users" stripe>
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="username" label="用户名" />
-          <el-table-column label="状态" width="110">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'active' ? 'success' : 'danger'">
-                {{ row.status === 'active' ? '正常' : '禁用' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="创建时间" width="190">
-            <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="280">
-            <template #default="{ row }">
-              <el-button
-                size="small"
-                :type="row.status === 'active' ? 'warning' : 'success'"
-                @click="toggle(row)"
-              >
-                {{ row.status === 'active' ? '禁用' : '启用' }}
-              </el-button>
-              <el-button size="small" @click="showReset(row)">重置密码</el-button>
-              <el-button size="small" type="danger" @click="del(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </section>
+    <div class="table-card">
+      <el-table :data="users" stripe>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="username" label="用户名" />
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'active' ? 'success' : 'danger'">
+              {{ row.status === 'active' ? '正常' : '禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="190">
+          <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="280">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              :type="row.status === 'active' ? 'warning' : 'success'"
+              @click="toggle(row)"
+            >
+              {{ row.status === 'active' ? '禁用' : '启用' }}
+            </el-button>
+            <el-button size="small" @click="showReset(row)">重置密码</el-button>
+            <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <el-dialog v-model="createVisible" title="创建用户" width="420px">
       <el-form :model="createForm" ref="createRef" label-width="82px">
@@ -103,18 +67,17 @@
         <el-button type="primary" @click="reset">确定</el-button>
       </template>
     </el-dialog>
-  </div>
+  </AdminShell>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '../../stores/auth'
-import { adminApi } from '../../api'
+import { onMounted, reactive, ref } from 'vue'
+import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const router = useRouter()
-const authStore = useAuthStore()
+import { adminApi } from '../../api'
+import AdminShell from './components/AdminShell.vue'
+
 const users = ref([])
 const createVisible = ref(false)
 const resetVisible = ref(false)
@@ -190,168 +153,9 @@ async function del(user) {
     // ignore cancel
   }
 }
-
-function handleLogout() {
-  authStore.logout()
-  router.push('/login')
-}
 </script>
 
 <style scoped>
-.admin-shell {
-  min-height: 100vh;
-  display: flex;
-  background: linear-gradient(180deg, #f8fafd 0%, #f4f7fb 100%);
-}
-
-.admin-sidebar {
-  width: 268px;
-  border-right: 1px solid var(--border-subtle);
-  background: #eceff4;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 12px;
-  gap: 14px;
-}
-
-.sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 8px 12px;
-}
-
-.brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  background: linear-gradient(135deg, #10a37f, #0f7d62);
-  color: #fff;
-  font-size: 17px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.brand-text h1 {
-  font-size: 16px;
-  color: #111827;
-  line-height: 1.1;
-}
-
-.brand-text p {
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.nav-item {
-  border: 0;
-  width: 100%;
-  height: 42px;
-  border-radius: 12px;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.nav-item:hover {
-  background: #dfe4ec;
-}
-
-.nav-item.active {
-  background: #d9e3f2;
-  color: #1f2a3b;
-  font-weight: 600;
-}
-
-.sidebar-foot {
-  margin-top: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: #f7f9fc;
-  padding: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.admin-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(140deg, #2f4a80, #1f2f52);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.meta-text {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.role {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.logout-btn {
-  width: 34px;
-  height: 34px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.logout-btn:hover {
-  background: #e8edf5;
-}
-
-.admin-main {
-  flex: 1;
-  min-width: 0;
-  padding: 28px 28px 24px;
-}
-
 .admin-header {
   display: flex;
   align-items: center;
@@ -398,20 +202,6 @@ function handleLogout() {
 }
 
 @media (max-width: 980px) {
-  .admin-shell {
-    flex-direction: column;
-  }
-
-  .admin-sidebar {
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .admin-main {
-    padding: 20px 14px 14px;
-  }
-
   .admin-header {
     flex-direction: column;
     align-items: flex-start;

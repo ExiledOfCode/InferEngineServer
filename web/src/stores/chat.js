@@ -2,139 +2,19 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { chatApi } from '../api'
 import { ElMessage } from 'element-plus'
+import {
+  formatApiError,
+  isInferenceCancelledError,
+  normalizeAssistantMessage,
+  normalizeFeedback,
+  normalizeMessages,
+  persistPinnedConversationIds,
+  pickLatestStoredTrace,
+  readPinnedConversationIds,
+  sanitizeAssistantContent
+} from './chat/helpers'
 
 const CHAT_STATUS_POLL_INTERVAL_MS = 500
-const PINNED_CONVERSATIONS_KEY = 'chat:pinned-conversations'
-
-function collapseRepeatedLines(content) {
-  const lines = String(content || '').split('\n')
-  if (lines.length <= 1) {
-    return String(content || '')
-  }
-
-  const kept = []
-  let prevNorm = ''
-  let sameRun = 0
-
-  for (const line of lines) {
-    const norm = line.trim()
-    if (norm && norm === prevNorm && norm.length <= 48) {
-      sameRun += 1
-      if (sameRun >= 2 && norm.length <= 32) {
-        if (kept.length > 0 && kept[kept.length - 1].trim() === norm) {
-          kept.pop()
-        }
-        break
-      }
-      if (sameRun >= 3) {
-        continue
-      }
-    } else {
-      prevNorm = norm
-      sameRun = 1
-    }
-    kept.push(line)
-  }
-  return kept.join('\n').trim()
-}
-
-function sanitizeAssistantContent(content) {
-  return collapseRepeatedLines(String(content || '').trim())
-}
-
-function formatApiError(err) {
-  const detail = err?.detail || err?.message || '发送失败'
-  const status = err?.status ? `HTTP ${err.status}` : ''
-  const method = err?.method ? String(err.method).toUpperCase() : ''
-  const baseURL = err?.baseURL || ''
-  const path = err?.url || ''
-  const requestLine = method || baseURL || path ? `${method} ${baseURL}${path}`.trim() : ''
-  return [detail, status, requestLine].filter(Boolean).join(' | ')
-}
-
-function isInferenceCancelledError(err) {
-  const detail = String(err?.detail || err?.message || '').toLowerCase()
-  return err?.status === 409 && (detail.includes('取消') || detail.includes('cancel'))
-}
-
-function normalizeAssistantMessage(payload) {
-  if (payload && typeof payload === 'object' && typeof payload.content === 'string') {
-    const normalized = { ...payload, content: sanitizeAssistantContent(payload.content) }
-    if (typeof payload.reasoning_content === 'string') {
-      normalized.reasoning_content = sanitizeAssistantContent(payload.reasoning_content)
-    }
-    if (typeof payload.raw_content === 'string') {
-      normalized.raw_content = sanitizeAssistantContent(payload.raw_content)
-    }
-    return normalized
-  }
-  if (typeof payload === 'string') {
-    return {
-      id: Date.now() + 1,
-      role: 'assistant',
-      content: sanitizeAssistantContent(payload),
-      created_at: new Date().toISOString()
-    }
-  }
-  return {
-    id: Date.now() + 1,
-    role: 'assistant',
-    content: sanitizeAssistantContent(`推理返回格式异常: ${JSON.stringify(payload)}`),
-    created_at: new Date().toISOString()
-  }
-}
-
-function normalizeMessages(messages) {
-  if (!Array.isArray(messages)) {
-    return []
-  }
-  return messages.map(msg => {
-    if (msg?.role === 'assistant' && typeof msg?.content === 'string') {
-      const normalized = { ...msg, content: sanitizeAssistantContent(msg.content) }
-      if (typeof msg?.reasoning_content === 'string') {
-        normalized.reasoning_content = sanitizeAssistantContent(msg.reasoning_content)
-      }
-      if (typeof msg?.raw_content === 'string') {
-        normalized.raw_content = sanitizeAssistantContent(msg.raw_content)
-      }
-      return normalized
-    }
-    return msg
-  })
-}
-
-function normalizeFeedback(value) {
-  return value === 'like' || value === 'dislike' ? value : null
-}
-
-function pickLatestStoredTrace(messages) {
-  if (!Array.isArray(messages)) return null
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const item = messages[i]
-    if (item?.role === 'assistant' && item?.inference_trace && typeof item.inference_trace === 'object') {
-      return item.inference_trace
-    }
-  }
-  return null
-}
-
-function readPinnedConversationIds() {
-  try {
-    const raw = localStorage.getItem(PINNED_CONVERSATIONS_KEY)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.map(id => String(id)).filter(Boolean) : []
-  } catch {
-    return []
-  }
-}
-
-function persistPinnedConversationIds(ids) {
-  try {
-    localStorage.setItem(PINNED_CONVERSATIONS_KEY, JSON.stringify(ids))
-  } catch {
-    // ignore persistence failures
-  }
-}
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref([])
@@ -144,6 +24,8 @@ export const useChatStore = defineStore('chat', () => {
   const loading = ref(false)
   const canceling = ref(false)
   const loadingConversationId = ref(null)
+  const loadingMessageBaselineCount = ref(0)
+  const loadingReplyReady = ref(false)
   const creatingConversation = ref(false)
   const switchingModel = ref(false)
   const inferenceStatus = ref(null)
@@ -163,6 +45,18 @@ export const useChatStore = defineStore('chat', () => {
       enabled: false,
       steps: []
     }
+  }
+
+  function markLoadingReplyStatus(conversationId, loadedMessages) {
+    if (String(loadingConversationId.value || '') !== String(conversationId || '')) {
+      return false
+    }
+    const baseline = Number(loadingMessageBaselineCount.value || 0)
+    const hasReply = baseline > 0 && Array.isArray(loadedMessages) && loadedMessages.length > baseline
+    if (hasReply) {
+      loadingReplyReady.value = true
+    }
+    return hasReply
   }
 
   function setInferenceTraceForConversation(conversationId, payload) {
@@ -313,6 +207,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     messages.value = loaded
+    markLoadingReplyStatus(conversationId, loaded)
     const storedTrace = pickLatestStoredTrace(loaded)
     if (storedTrace) {
       inferenceTrace.value = storedTrace
@@ -426,6 +321,42 @@ export const useChatStore = defineStore('chat', () => {
       }
       return loaded
     }
+    const pendingAssistantId = `pending-assistant-${Date.now()}`
+    const pendingAssistantCreatedAt = new Date().toISOString()
+    const replacePendingAssistant = (payload, pending = true) => {
+      if (!isActiveConversation()) {
+        return
+      }
+      const normalized = normalizeAssistantMessage(payload)
+      const nextMessage = {
+        conversation_id: convId,
+        role: 'assistant',
+        created_at: pendingAssistantCreatedAt,
+        ...normalized,
+        id: pending ? pendingAssistantId : normalized.id,
+        pending
+      }
+      const existingIndex = messages.value.findIndex(message => message.id === pendingAssistantId)
+      if (existingIndex === -1) {
+        messages.value.push(nextMessage)
+        return
+      }
+      messages.value.splice(existingIndex, 1, nextMessage)
+    }
+    const seedPendingAssistant = () => {
+      if (!isActiveConversation()) {
+        return
+      }
+      replacePendingAssistant({
+        id: pendingAssistantId,
+        conversation_id: convId,
+        role: 'assistant',
+        content: '',
+        reasoning_content: null,
+        raw_content: null,
+        created_at: pendingAssistantCreatedAt
+      })
+    }
     const tempUserMessage = {
       id: Date.now(),
       conversation_id: convId,
@@ -437,6 +368,9 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push(tempUserMessage)
     loading.value = true
     loadingConversationId.value = convId
+    loadingMessageBaselineCount.value = messages.value.length
+    seedPendingAssistant()
+    loadingReplyReady.value = true
     let traceTimer = null
     let statusTimer = null
     const pollTrace = async () => {
@@ -463,27 +397,58 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      const response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content, thinkEnabled))
+      let receivedStreamDelta = false
+      let response = null
+
+      try {
+        const streamedPayload = await chatApi.streamMessage(convId, content, thinkEnabled, {
+          onDelta: payload => {
+            receivedStreamDelta = true
+            const liveMessage = payload?.message
+            if (!liveMessage) {
+              return
+            }
+            replacePendingAssistant(liveMessage)
+          },
+          onDone: payload => {
+            if (payload?.inference_trace) {
+              setTraceIfActive(payload.inference_trace)
+            }
+            if (payload?.message) {
+              replacePendingAssistant(payload.message, false)
+            }
+          }
+        })
+        response = normalizeAssistantMessage(streamedPayload?.message || streamedPayload)
+      } catch (err) {
+        if (!receivedStreamDelta && !isInferenceCancelledError(err) && err?.status !== 401) {
+          response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content, thinkEnabled))
+        } else {
+          throw err
+        }
+      }
+
       if (response?.inference_trace) {
         setTraceIfActive(response.inference_trace)
       } else if (!isTraceEnabled()) {
         setTraceIfActive(disabledTracePayload())
       }
-      // 优先以后端数据库为准回拉，避免前后端状态漂移
       try {
         const loaded = await refreshMessagesIfActive()
+        markLoadingReplyStatus(convId, loaded)
         if (isActiveConversation() && loaded.length <= 2 && currentConversation.value) {
           currentConversation.value.title = content.slice(0, 50)
         }
       } catch {
-        if (isActiveConversation()) {
-          messages.value.push(response)
+        if (isActiveConversation() && response) {
+          replacePendingAssistant(response, false)
         }
       }
     } catch (err) {
       if (isInferenceCancelledError(err)) {
         try {
           const loaded = await refreshMessagesIfActive()
+          markLoadingReplyStatus(convId, loaded)
           if (
             isActiveConversation()
             && loaded.length <= 2
@@ -504,12 +469,12 @@ export const useChatStore = defineStore('chat', () => {
       }
       const detail = formatApiError(err)
       if (isActiveConversation()) {
-        messages.value.push({
+        replacePendingAssistant({
           id: Date.now() + 1,
           role: 'assistant',
           content: `推理失败: ${sanitizeAssistantContent(detail)}`,
           created_at: new Date().toISOString()
-        })
+        }, false)
       }
       ElMessage.error(detail)
     } finally {
@@ -542,6 +507,8 @@ export const useChatStore = defineStore('chat', () => {
       }
       loading.value = false
       loadingConversationId.value = null
+      loadingMessageBaselineCount.value = 0
+      loadingReplyReady.value = false
     }
   }
 
@@ -553,6 +520,7 @@ export const useChatStore = defineStore('chat', () => {
     loading,
     canceling,
     loadingConversationId,
+    loadingReplyReady,
     creatingConversation,
     switchingModel,
     inferenceStatus,
