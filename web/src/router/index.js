@@ -6,7 +6,9 @@ const routes = [
   { path: '/chat', name: 'Chat', component: () => import('../views/Chat.vue'), meta: { requiresAuth: true, role: 'user' } },
   { path: '/admin', redirect: '/admin/dashboard', meta: { requiresAuth: true, role: 'admin' }, children: [
     { path: 'dashboard', name: 'Dashboard', component: () => import('../views/admin/Dashboard.vue') },
-    { path: 'users', name: 'Users', component: () => import('../views/admin/Users.vue') }
+    { path: 'users', name: 'Users', component: () => import('../views/admin/Users.vue') },
+    { path: 'engine', name: 'EngineOptimization', component: () => import('../views/admin/EngineOptimization.vue') },
+    { path: 'operators', name: 'OperatorOptimization', component: () => import('../views/admin/OperatorOptimization.vue') }
   ]},
   { path: '/', redirect: '/login' }
 ]

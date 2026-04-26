@@ -79,7 +79,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function isTraceEnabled() {
-    return inferenceStatus.value?.trace_enabled !== false
+    return inferenceStatus.value?.trace_enabled === true
   }
 
   function isModelLoadingStatus() {

@@ -24,7 +24,7 @@ class InferenceEngineOptionsResponse(BaseModel):
     current_model_seq_len: Optional[int] = None
     running: bool = False
     ready: bool = False
-    trace_enabled: bool = True
+    trace_enabled: bool = False
     optimized_weight_loading: bool = False
     effective_optimized_weight_loading: bool = False
     paged_kv_cache: bool = False

@@ -1,5 +1,5 @@
 {
-  "updated_at": 1776836179.5882452,
+  "updated_at": 1777204345.3892245,
   "options": {
     "trace_enabled": true,
     "optimized_weight_loading": true,
@@ -7,7 +7,7 @@
     "warmup_on_model_switch": true
   },
   "settings": {
-    "max_new_tokens": 256,
-    "temperature": 0.0
+    "max_new_tokens": 7168,
+    "temperature": 0.1
   }
 }

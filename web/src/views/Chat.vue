@@ -6,7 +6,7 @@
           <el-icon><Plus /></el-icon>
           <span v-if="!sidebarCollapsed">新对话</span>
         </button>
-        <button class="sidebar-toggle" title="收起侧边栏" @click="toggleSidebar">
+        <button class="sidebar-toggle" :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleSidebar">
           <el-icon v-if="sidebarCollapsed"><Expand /></el-icon>
           <el-icon v-else><Fold /></el-icon>
         </button>
@@ -283,7 +283,7 @@
       ></div>
       <div class="trace-sidebar-header">
         <h3 v-if="!traceSidebarCollapsed">推理引擎过程</h3>
-        <button class="trace-sidebar-toggle" @click="toggleTraceSidebar">
+        <button class="trace-sidebar-toggle" :title="traceSidebarCollapsed ? '展开埋点面板' : '收起埋点面板'" @click="toggleTraceSidebar">
           <el-icon v-if="traceSidebarCollapsed"><Expand /></el-icon>
           <el-icon v-else><Fold /></el-icon>
         </button>

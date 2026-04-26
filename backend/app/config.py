@@ -3,7 +3,11 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings
 
-from .config_defaults import DEFAULT_INFERENCE_ENGINE_OPTIONS, DEFAULT_INFERENCE_MODELS
+from .config_defaults import (
+    DEFAULT_INFERENCE_ENGINE_OPTIONS,
+    DEFAULT_INFERENCE_MODELS,
+    DEFAULT_INFERENCE_OPERATOR_OPTIONS,
+)
 
 
 def _dump_default_json(payload) -> str:
@@ -33,6 +37,8 @@ class Settings(BaseSettings):
     INFERENCE_TEMPERATURE: float = 0.0
     INFERENCE_RUNTIME_OPTIONS_PATH: str = "runtime/inference_options.json"
     INFERENCE_ENGINE_OPTIONS_JSON: str = _dump_default_json(DEFAULT_INFERENCE_ENGINE_OPTIONS)
+    INFERENCE_OPERATOR_OPTIONS_PATH: str = "runtime/operator_options.json"
+    INFERENCE_OPERATOR_OPTIONS_JSON: str = _dump_default_json(DEFAULT_INFERENCE_OPERATOR_OPTIONS)
     INFERENCE_MODELS_JSON: str = _dump_default_json(DEFAULT_INFERENCE_MODELS)
 
     # CORS 配置

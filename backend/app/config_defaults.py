@@ -3,7 +3,7 @@ DEFAULT_INFERENCE_ENGINE_OPTIONS = [
         "id": "trace_enabled",
         "name": "数据埋点",
         "description": "控制引擎阶段埋点与算子 profiling，关闭后更接近纯推理速度。",
-        "default_enabled": True,
+        "default_enabled": False,
         "requires_restart": True,
     },
     {
@@ -26,6 +26,60 @@ DEFAULT_INFERENCE_ENGINE_OPTIONS = [
         "description": "切换模型后立即启动常驻进程，减少首条请求的冷启动等待。",
         "default_enabled": True,
         "requires_restart": False,
+    },
+]
+
+
+DEFAULT_INFERENCE_OPERATOR_OPTIONS = [
+    {
+        "id": "matmul_impl",
+        "name": "GEMM / MatMul",
+        "description": "控制线性层主乘法算子的 CUDA 实现版本。",
+        "env_var": "KLLM_OP_MATMUL_IMPL",
+        "default_selected": "kuiper_cuda",
+        "requires_restart": True,
+        "choices": [
+            {
+                "id": "kuiper_cuda",
+                "name": "Kuiper CUDA",
+                "description": "项目当前默认 CUDA kernel，适合单 token decode 场景。",
+                "supported": True,
+            },
+            {
+                "id": "cublas",
+                "name": "cuBLAS",
+                "description": "基于 cuBLAS 的 GEMMEx 实现，bf16 权重会先将激活转换为 bf16 后再计算。",
+                "supported": True,
+            },
+            {
+                "id": "lab_cp_async_fp32",
+                "name": "Lab cp.async Decode",
+                "description": "基于手写 cp.async tile GEMM 思路改造的实验版实现，当前覆盖 fp32/bf16 权重的单 token decode matmul；不满足条件时会自动回退。",
+                "supported": True,
+            },
+        ],
+    },
+    {
+        "id": "rmsnorm_impl",
+        "name": "RMSNorm",
+        "description": "控制 RMSNorm 的 CUDA 实现版本。",
+        "env_var": "KLLM_OP_RMSNORM_IMPL",
+        "default_selected": "kuiper_cuda",
+        "requires_restart": True,
+        "choices": [
+            {
+                "id": "kuiper_cuda",
+                "name": "Kuiper CUDA",
+                "description": "项目当前默认 RMSNorm kernel。",
+                "supported": True,
+            },
+            {
+                "id": "lab_warp_reduce",
+                "name": "Lab Warp Reduce",
+                "description": "基于 warp reduce 的实验版 RMSNorm 实现。",
+                "supported": True,
+            },
+        ],
     },
 ]
 

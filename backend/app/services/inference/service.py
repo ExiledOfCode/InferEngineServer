@@ -5,9 +5,10 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from ...config import settings
-from ...config_defaults import DEFAULT_INFERENCE_ENGINE_OPTIONS
+from ...config_defaults import DEFAULT_INFERENCE_ENGINE_OPTIONS, DEFAULT_INFERENCE_OPERATOR_OPTIONS
 from .errors import InferenceCancelledError
 from .models import ModelRegistryMixin
+from .operators import OperatorOptionsMixin
 from .process import ProcessMixin
 from .prompts import PromptMixin
 from .runtime import RuntimeOptionsMixin
@@ -16,6 +17,7 @@ from .trace import TraceMixin
 
 class InferenceService(
     RuntimeOptionsMixin,
+    OperatorOptionsMixin,
     PromptMixin,
     TraceMixin,
     ModelRegistryMixin,
@@ -33,6 +35,7 @@ class InferenceService(
     MAX_TEMPERATURE = 2.0
 
     DEFAULT_ENGINE_OPTIONS: List[Dict[str, Any]] = DEFAULT_INFERENCE_ENGINE_OPTIONS
+    DEFAULT_OPERATOR_OPTIONS: List[Dict[str, Any]] = DEFAULT_INFERENCE_OPERATOR_OPTIONS
 
     def __init__(self):
         self.engine_path = os.path.abspath(settings.INFERENCE_ENGINE_PATH)
@@ -97,9 +100,13 @@ class InferenceService(
         self.runtime_state_payload = self._load_runtime_payload()
         self.engine_option_catalog = self._load_engine_option_catalog()
         self.engine_option_values = self._load_engine_option_values(self.runtime_state_payload)
+        self.operator_options_path = self._resolve_operator_options_path()
+        self.operator_state_payload = self._load_operator_payload()
+        self.operator_group_catalog = self._load_operator_group_catalog()
+        self.operator_option_values = self._load_operator_option_values(self.operator_state_payload)
         self.runtime_max_new_tokens = self._load_runtime_max_new_tokens(self.runtime_state_payload)
         self.runtime_temperature = self._load_runtime_temperature(self.runtime_state_payload)
-        self.trace_enabled = True
+        self.trace_enabled = False
         self.optimized_weight_loading = False
         self.paged_kv_cache = True
         self.warmup_on_model_switch = True
@@ -140,7 +147,10 @@ class InferenceService(
             "configured_default_model_id": getattr(settings, "INFERENCE_DEFAULT_MODEL_ID", ""),
             "has_models_json": bool(str(getattr(settings, "INFERENCE_MODELS_JSON", "") or "").strip()),
             "runtime_options_path": self.runtime_options_path,
+            "operator_options_path": self.operator_options_path,
             "engine_options": self.list_engine_options(),
+            "operator_options": self.list_operator_groups(),
+            "operator_env": self.operator_process_env(),
             "trace_enabled": self.trace_enabled,
             "optimized_weight_loading": self.optimized_weight_loading,
             "effective_optimized_weight_loading": self.optimized_weight_loading and self._supports_optimized_weight_loading(),

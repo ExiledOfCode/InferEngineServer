@@ -92,7 +92,7 @@ export function useChatView() {
   const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.current_model_family || '').toLowerCase())
   const currentModelSeqLen = computed(() => Number(chatStore.inferenceStatus?.current_model_seq_len || 0))
   const currentModelSeqLenText = computed(() => formatModelSeqLen(currentModelSeqLen.value).replace(/^ · /, ''))
-  const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled !== false)
+  const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled === true)
   const modelLoadingVisible = computed(() => {
     const state = String(chatStore.inferenceStatus?.model_loading_progress?.state || '').toLowerCase()
     return ['starting', 'loading'].includes(state)

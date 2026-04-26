@@ -15,12 +15,14 @@ class ProcessMixin:
     def _process_env(self) -> Dict[str, str]:
         paged_kv_cache_enabled = self.paged_kv_cache and self._supports_paged_kv_cache()
         optimized_weight_loading = self.optimized_weight_loading and self._supports_optimized_weight_loading()
+        operator_env = self.operator_process_env() if hasattr(self, "operator_process_env") else {}
         return {
             **os.environ,
             "CUDA_VISIBLE_DEVICES": os.getenv("CUDA_VISIBLE_DEVICES", "0"),
             "KLLM_TRACE_ENABLED": "1" if self.trace_enabled else "0",
             "KLLM_OPTIMIZED_WEIGHT_LOADING": "1" if optimized_weight_loading else "0",
             "KLLM_PAGED_KV_CACHE": "1" if paged_kv_cache_enabled else "0",
+            **operator_env,
         }
 
     def _start_engine(self):
@@ -134,6 +136,8 @@ class ProcessMixin:
         print(f"  optimized_weight_loading: {self.optimized_weight_loading}")
         print(f"  paged_kv_cache: {self.paged_kv_cache}")
         print(f"  warmup_on_model_switch: {self.warmup_on_model_switch}")
+        if hasattr(self, "operator_process_env"):
+            print(f"  operator_env: {self.operator_process_env()}")
         print("=" * 50)
 
     def _start_stdout_reader(self):

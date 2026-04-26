@@ -6,6 +6,7 @@ from ..models.user import User
 from ..models.conversation import Conversation
 from ..models.message import Message
 from ..schemas.inference import InferenceEngineOptionsResponse, InferenceEngineOptionsUpdateRequest
+from ..schemas.operator import OperatorOptionsResponse, OperatorOptionsUpdateRequest
 from ..schemas.user import UserCreate, UserUpdate, UserResponse
 from ..services.inference_service import inference_service
 from ..utils.security import get_current_admin, get_password_hash
@@ -50,6 +51,24 @@ def update_inference_options(
                 temperature=data.temperature,
             )
         return inference_service.engine_options_status()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+@router.get("/operator/options", response_model=OperatorOptionsResponse)
+def get_operator_options(current_admin: User = Depends(get_current_admin)):
+    """获取算子优化配置"""
+    return inference_service.operator_options_status()
+
+@router.put("/operator/options", response_model=OperatorOptionsResponse)
+def update_operator_options(
+    data: OperatorOptionsUpdateRequest,
+    current_admin: User = Depends(get_current_admin),
+):
+    """更新算子优化配置"""
+    try:
+        return inference_service.update_operator_options(data.operators)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:

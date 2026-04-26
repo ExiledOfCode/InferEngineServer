@@ -65,6 +65,7 @@ class InferenceServiceTestCase(unittest.TestCase):
         ready_dir = os.path.join(engine_dir, "models", "ready-model")
         broken_dir = os.path.join(engine_dir, "models", "broken-model")
         runtime_path = os.path.join(workdir, "runtime", "inference_options.json")
+        operator_runtime_path = os.path.join(workdir, "runtime", "operator_options.json")
 
         ready_executable = os.path.join(engine_dir, "build", "demo", "qwen3_infer")
         broken_executable = os.path.join(engine_dir, "build", "demo", "qwen_infer")
@@ -91,6 +92,19 @@ class InferenceServiceTestCase(unittest.TestCase):
                     "settings": {
                         "max_new_tokens": 96,
                         "temperature": 0.7,
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        self._write_text(
+            operator_runtime_path,
+            json.dumps(
+                {
+                    "operators": {
+                        "matmul_impl": "cublas",
+                        "rmsnorm_impl": "lab_warp_reduce",
                     },
                 },
                 ensure_ascii=False,
@@ -130,6 +144,52 @@ class InferenceServiceTestCase(unittest.TestCase):
                 "requires_restart": False,
             }
         ]
+        operator_options = [
+            {
+                "id": "matmul_impl",
+                "name": "GEMM / MatMul",
+                "description": "测试矩阵乘实现切换。",
+                "env_var": "KLLM_OP_MATMUL_IMPL",
+                "default_selected": "kuiper_cuda",
+                "requires_restart": True,
+                "choices": [
+                    {
+                        "id": "kuiper_cuda",
+                        "name": "Kuiper CUDA",
+                        "description": "默认实现。",
+                        "supported": True,
+                    },
+                    {
+                        "id": "cublas",
+                        "name": "cuBLAS",
+                        "description": "测试实现。",
+                        "supported": True,
+                    },
+                ],
+            },
+            {
+                "id": "rmsnorm_impl",
+                "name": "RMSNorm",
+                "description": "测试 RMSNorm 实现切换。",
+                "env_var": "KLLM_OP_RMSNORM_IMPL",
+                "default_selected": "kuiper_cuda",
+                "requires_restart": True,
+                "choices": [
+                    {
+                        "id": "kuiper_cuda",
+                        "name": "Kuiper CUDA",
+                        "description": "默认实现。",
+                        "supported": True,
+                    },
+                    {
+                        "id": "lab_warp_reduce",
+                        "name": "Lab Warp Reduce",
+                        "description": "实验实现。",
+                        "supported": True,
+                    },
+                ],
+            },
+        ]
 
         self._override_settings(
             INFERENCE_ENGINE_PATH=engine_dir,
@@ -139,9 +199,11 @@ class InferenceServiceTestCase(unittest.TestCase):
             INFERENCE_DEFAULT_MODEL_ID="broken-model",
             INFERENCE_RUNTIME_OPTIONS_PATH=runtime_path,
             INFERENCE_ENGINE_OPTIONS_JSON=json.dumps(options, ensure_ascii=False, indent=2),
+            INFERENCE_OPERATOR_OPTIONS_PATH=operator_runtime_path,
+            INFERENCE_OPERATOR_OPTIONS_JSON=json.dumps(operator_options, ensure_ascii=False, indent=2),
             INFERENCE_MODELS_JSON=json.dumps(models, ensure_ascii=False, indent=2),
         )
-        return InferenceService(), runtime_path
+        return InferenceService(), runtime_path, operator_runtime_path
 
     def test_parse_assistant_response_extracts_reasoning_and_answer(self):
         parsed = InferenceService.parse_assistant_response(
@@ -180,7 +242,7 @@ class InferenceServiceTestCase(unittest.TestCase):
 
     def test_chatml_prompt_ignores_incomplete_assistant_thinking(self):
         with tempfile.TemporaryDirectory() as workdir:
-            service, _ = self._build_service(workdir)
+            service, _, _ = self._build_service(workdir)
             history = [
                 {"role": "assistant", "content": "<think>不应进入历史"},
                 {"role": "user", "content": "上一轮问题"},
@@ -196,13 +258,15 @@ class InferenceServiceTestCase(unittest.TestCase):
 
     def test_model_registry_prefers_ready_model_and_persists_runtime_updates(self):
         with tempfile.TemporaryDirectory() as workdir:
-            service, runtime_path = self._build_service(workdir)
+            service, runtime_path, operator_runtime_path = self._build_service(workdir)
 
             self.assertEqual(service.current_model_id, "ready_model")
             self.assertFalse(service.trace_enabled)
             self.assertFalse(service.warmup_on_model_switch)
             self.assertEqual(service.max_new_tokens, 96)
             self.assertAlmostEqual(service.temperature, 0.7, places=6)
+            self.assertEqual(service._operator_choice("matmul_impl"), "cublas")
+            self.assertEqual(service._operator_choice("rmsnorm_impl"), "lab_warp_reduce")
 
             listed = {item["id"]: item for item in service.list_models()}
             self.assertFalse(listed["broken_model"]["ready"])
@@ -210,18 +274,26 @@ class InferenceServiceTestCase(unittest.TestCase):
 
             service.update_engine_options({"trace_enabled": True})
             service.update_generation_settings(max_new_tokens=120, temperature=1.1)
+            service.update_operator_options({"matmul_impl": "kuiper_cuda"})
 
             with open(runtime_path, "r", encoding="utf-8") as fh:
                 payload = json.load(fh)
+            with open(operator_runtime_path, "r", encoding="utf-8") as fh:
+                operator_payload = json.load(fh)
 
             self.assertTrue(payload["options"]["trace_enabled"])
             self.assertFalse(payload["options"]["warmup_on_model_switch"])
             self.assertEqual(payload["settings"]["max_new_tokens"], 120)
             self.assertAlmostEqual(payload["settings"]["temperature"], 1.1, places=6)
+            self.assertEqual(operator_payload["operators"]["matmul_impl"], "kuiper_cuda")
+            self.assertEqual(operator_payload["operators"]["rmsnorm_impl"], "lab_warp_reduce")
+            process_env = service._process_env()
+            self.assertEqual(process_env["KLLM_OP_MATMUL_IMPL"], "kuiper_cuda")
+            self.assertEqual(process_env["KLLM_OP_RMSNORM_IMPL"], "lab_warp_reduce")
 
     def test_qwen_reasoning_only_response_triggers_sync_answer_rescue(self):
         with tempfile.TemporaryDirectory() as workdir:
-            service, _ = self._build_service(workdir)
+            service, _, _ = self._build_service(workdir)
             prompts = []
 
             def fake_generate(prompt):
@@ -243,7 +315,7 @@ class InferenceServiceTestCase(unittest.TestCase):
 
     def test_qwen_reasoning_only_stream_triggers_answer_rescue(self):
         with tempfile.TemporaryDirectory() as workdir:
-            service, _ = self._build_service(workdir)
+            service, _, _ = self._build_service(workdir)
             prompts = []
 
             def fake_stream(prompt):
