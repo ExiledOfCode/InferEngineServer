@@ -373,6 +373,15 @@ export const useChatStore = defineStore('chat', () => {
     loadingReplyReady.value = true
     let traceTimer = null
     let statusTimer = null
+    const clearLoadingState = () => {
+      if (String(loadingConversationId.value || '') !== String(convId || '')) {
+        return
+      }
+      loading.value = false
+      loadingConversationId.value = null
+      loadingMessageBaselineCount.value = 0
+      loadingReplyReady.value = false
+    }
     const pollTrace = async () => {
       try {
         await fetchInferenceTrace({ conversationId: convId })
@@ -417,6 +426,7 @@ export const useChatStore = defineStore('chat', () => {
             if (payload?.message) {
               replacePendingAssistant(payload.message, false)
             }
+            clearLoadingState()
           }
         })
         response = normalizeAssistantMessage(streamedPayload?.message || streamedPayload)
@@ -433,6 +443,7 @@ export const useChatStore = defineStore('chat', () => {
       } else if (!isTraceEnabled()) {
         setTraceIfActive(disabledTracePayload())
       }
+      clearLoadingState()
       try {
         const loaded = await refreshMessagesIfActive()
         markLoadingReplyStatus(convId, loaded)
@@ -446,6 +457,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (err) {
       if (isInferenceCancelledError(err)) {
+        clearLoadingState()
         try {
           const loaded = await refreshMessagesIfActive()
           markLoadingReplyStatus(convId, loaded)
@@ -462,6 +474,7 @@ export const useChatStore = defineStore('chat', () => {
         }
         return
       }
+      clearLoadingState()
       try {
         await refreshMessagesIfActive()
       } catch {
@@ -486,6 +499,7 @@ export const useChatStore = defineStore('chat', () => {
         window.clearInterval(statusTimer)
         statusTimer = null
       }
+      clearLoadingState()
       if (isTraceEnabled()) {
         try {
           await fetchInferenceTrace({ conversationId: convId })
@@ -505,10 +519,6 @@ export const useChatStore = defineStore('chat', () => {
       } catch {
         // ignore conversation list refresh failure
       }
-      loading.value = false
-      loadingConversationId.value = null
-      loadingMessageBaselineCount.value = 0
-      loadingReplyReady.value = false
     }
   }
 

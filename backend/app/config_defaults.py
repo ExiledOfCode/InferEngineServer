@@ -153,6 +153,18 @@ DEFAULT_INFERENCE_MODELS = [
         "max_new_tokens": 8192,
     },
     {
+        "id": "qwen3_8b_awq_int4",
+        "name": "Qwen3-8B-AWQ-INT4",
+        "family": "qwen3",
+        "model_dir": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-8B",
+        "model_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-8B/Qwen3-8B-awq-int4.bin",
+        "tokenizer_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/models/Qwen3-8B/tokenizer.json",
+        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/KuiperLLama/build/demo/qwen3_infer",
+        "prompt_format": "chatml",
+        "supports_reasoning": True,
+        "max_new_tokens": 8192,
+    },
+    {
         "id": "llama_3_2_1b_instruct_bf16",
         "name": "Llama-3.2-1B-Instruct-BF16",
         "family": "llama3",

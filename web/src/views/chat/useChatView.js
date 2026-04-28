@@ -184,6 +184,17 @@ export function useChatView() {
     return `${value.toFixed(2)} ms`
   }
 
+  function formatFinishReason(reason) {
+    const value = String(reason || '').toLowerCase()
+    if (value === 'length') return '达到 max_token'
+    if (value === 'eos') return '模型输出结束符'
+    if (value === 'stop_marker') return '命中停止标记'
+    if (value === 'same_token_repeat') return '连续重复 token'
+    if (value === 'window_repeat') return '窗口重复'
+    if (value === 'cancelled') return '已停止'
+    return reason || '-'
+  }
+
   function fallbackCopyText(text) {
     const textarea = document.createElement('textarea')
     textarea.value = text
@@ -483,6 +494,7 @@ export function useChatView() {
     engineTraceEnabled,
     formatConversationTime,
     formatDuration,
+    formatFinishReason,
     formatModelSeqLen,
     formatTokenIds,
     handleComposerAction,

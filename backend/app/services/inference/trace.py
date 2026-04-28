@@ -192,6 +192,8 @@ class TraceMixin:
                 generated_steps = event.get("generated_steps")
                 if isinstance(generated_steps, (int, float)):
                     trace["generated_steps"] = int(generated_steps)
+                if isinstance(event.get("finish_reason"), str):
+                    trace["finish_reason"] = event["finish_reason"]
                 state = str(event.get("state") or "").strip().lower()
                 if state in {"completed", "cancelled", "error"}:
                     trace["state"] = state
@@ -270,6 +272,12 @@ class TraceMixin:
                     step["sampler"] = event["sampler"]
                 if isinstance(event.get("generated_token_count"), (int, float)):
                     step["generated_token_count"] = int(event["generated_token_count"])
+                if isinstance(event.get("requested_max_new_tokens"), (int, float)):
+                    step["requested_max_new_tokens"] = int(event["requested_max_new_tokens"])
+                if isinstance(event.get("effective_max_new_tokens"), (int, float)):
+                    step["effective_max_new_tokens"] = int(event["effective_max_new_tokens"])
+                if isinstance(event.get("finish_reason"), str):
+                    step["finish_reason"] = event["finish_reason"]
                 selected_token = event.get("selected_token")
                 selected_token_id = event.get("selected_token_id")
                 if selected_token is not None or selected_token_id is not None:

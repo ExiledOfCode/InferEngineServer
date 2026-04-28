@@ -3,7 +3,7 @@ import { useAuthStore } from '../stores/auth'
 import router from '../router'
 
 const rawBaseURL = (import.meta.env.VITE_API_BASE_URL || '').trim()
-const timeout = Number(import.meta.env.VITE_API_TIMEOUT || 300000)
+const timeout = Number(import.meta.env.VITE_API_TIMEOUT || 600000)
 const apiDebug = String(import.meta.env.VITE_API_DEBUG || '').toLowerCase() === 'true'
 const isDev = Boolean(import.meta.env.DEV)
 

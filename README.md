@@ -62,7 +62,7 @@ pnpm -v
 # 前端直接请求后端时使用，例如 http://127.0.0.1:8000/api
 VITE_API_BASE_URL=
 # API 超时（毫秒）
-VITE_API_TIMEOUT=300000
+VITE_API_TIMEOUT=600000
 # 打开浏览器控制台 API 调试日志
 VITE_API_DEBUG=false
 # Vite dev proxy 目标地址

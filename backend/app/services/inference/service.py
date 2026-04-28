@@ -77,7 +77,7 @@ class InferenceService(
         self.default_temperature = self._read_float("INFERENCE_TEMPERATURE", 0.0)
         self.temperature = self.default_temperature
 
-        self.timeout_seconds = self._read_positive_int("INFERENCE_TIMEOUT_SECONDS", 180)
+        self.timeout_seconds = self._read_positive_int("INFERENCE_TIMEOUT_SECONDS", 600)
         self.startup_timeout_seconds = self._read_positive_int("INFERENCE_STARTUP_TIMEOUT_SECONDS", 900)
         self.max_history_messages = self._read_positive_int("INFERENCE_MAX_HISTORY_MESSAGES", 8)
         self.max_prompt_chars = self._read_positive_int("INFERENCE_MAX_PROMPT_CHARS", 2400)

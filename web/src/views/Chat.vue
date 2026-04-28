@@ -472,6 +472,14 @@
               <span class="label">采样器</span>
               <pre class="value">{{ step.sampler || 'argmax' }}</pre>
             </div>
+            <div class="trace-field">
+              <span class="label">生成 token</span>
+              <pre class="value">{{ step.generated_token_count || 0 }} / {{ step.effective_max_new_tokens || '-' }}</pre>
+            </div>
+            <div class="trace-field" v-if="step.finish_reason">
+              <span class="label">停止原因</span>
+              <pre class="value">{{ formatFinishReason(step.finish_reason) }}</pre>
+            </div>
             <div class="trace-field" v-if="(step.selected_tokens || []).length > 0">
               <span class="label">已选 token</span>
               <div class="sample-list trace-scrollbox trace-scrollbox--box trace-scrollbox--text">
