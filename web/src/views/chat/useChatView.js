@@ -90,6 +90,7 @@ export function useChatView() {
   ))
   const currentModelName = computed(() => chatStore.inferenceStatus?.current_model_name || '')
   const currentModelFamily = computed(() => String(chatStore.inferenceStatus?.current_model_family || '').toLowerCase())
+  const currentModelSupportsReasoning = computed(() => chatStore.inferenceStatus?.current_model_supports_reasoning === true)
   const currentModelSeqLen = computed(() => Number(chatStore.inferenceStatus?.current_model_seq_len || 0))
   const currentModelSeqLenText = computed(() => formatModelSeqLen(currentModelSeqLen.value).replace(/^ · /, ''))
   const engineTraceEnabled = computed(() => chatStore.inferenceStatus?.trace_enabled === true)
@@ -316,7 +317,7 @@ export function useChatView() {
     const content = inputMessage.value.trim()
     if (!content || composerStopping.value) return
     inputMessage.value = ''
-    await chatStore.sendMessage(content, thinkEnabled.value)
+    await chatStore.sendMessage(content, currentModelSupportsReasoning.value && thinkEnabled.value)
     nextTick(() => inputRef.value?.focus && inputRef.value.focus())
   }
 
@@ -477,6 +478,7 @@ export function useChatView() {
     composerActionTitle,
     composerStopping,
     currentModelName,
+    currentModelSupportsReasoning,
     currentModelSeqLenText,
     engineTraceEnabled,
     formatConversationTime,

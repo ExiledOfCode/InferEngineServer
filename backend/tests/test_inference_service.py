@@ -256,11 +256,55 @@ class InferenceServiceTestCase(unittest.TestCase):
             self.assertNotIn("不应进入历史", prompt)
             self.assertIn("<|im_start|>assistant\n<think>\n\n</think>\n\n", prompt)
 
+    def test_qwen3_thinking_prompt_prefix_is_restored_for_parser(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            service, _, _ = self._build_service(workdir)
+
+            prompt = service._build_chatml_prompt("新的问题", [], think_enabled=True)
+            normalized = service._normalize_generated_response("先分析\n</think>\n最终答案", True)
+            parsed = service.parse_streaming_assistant_response(normalized)
+
+            self.assertTrue(service._supports_reasoning_flow())
+            self.assertTrue(prompt.endswith("<|im_start|>assistant\n<think>\n"))
+            self.assertEqual(parsed["reasoning_content"], "先分析")
+            self.assertEqual(parsed["content"], "最终答案")
+
+    def test_qwen3_instruct_does_not_use_reasoning_flow(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            service, _, _ = self._build_service(workdir)
+            service.current_model_id = "qwen3_4b_instruct_2507_int8"
+            service.current_model_name = "Qwen3-4B-Instruct-2507-INT8"
+            service.current_model_supports_reasoning = service._infer_reasoning_support(
+                None,
+                "qwen3",
+                service.current_model_id,
+                service.current_model_name,
+            )
+
+            prompt = service._build_chatml_prompt("新的问题", [], think_enabled=True)
+            normalized = service._normalize_generated_response("直接答案", True)
+
+            self.assertFalse(service._supports_reasoning_flow())
+            self.assertTrue(prompt.endswith("<|im_start|>assistant\n"))
+            self.assertNotIn("<think>", prompt)
+            self.assertEqual(normalized, "直接答案")
+
+    def test_runtime_max_new_tokens_clamps_to_model_context(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            service, _, _ = self._build_service(workdir)
+            service.current_model_seq_len = 256
+            service.runtime_max_new_tokens = 8192
+
+            self.assertEqual(service._resolved_max_new_tokens(None), 255)
+
     def test_model_registry_prefers_ready_model_and_persists_runtime_updates(self):
         with tempfile.TemporaryDirectory() as workdir:
             service, runtime_path, operator_runtime_path = self._build_service(workdir)
 
             self.assertEqual(service.current_model_id, "ready_model")
+            self.assertTrue(service.current_model_supports_reasoning)
+            ready_info = next(item for item in service.list_models() if item["id"] == "ready_model")
+            self.assertTrue(ready_info["supports_reasoning"])
             self.assertFalse(service.trace_enabled)
             self.assertFalse(service.warmup_on_model_switch)
             self.assertEqual(service.max_new_tokens, 96)

@@ -49,6 +49,7 @@ class InferenceService(
         self.current_model_id: Optional[str] = None
         self.current_model_name: Optional[str] = None
         self.current_model_family: Optional[str] = None
+        self.current_model_supports_reasoning: bool = False
         self.current_model_dir: Optional[str] = None
         self.current_model_seq_len: Optional[int] = None
         self.available_models: List[Dict[str, Any]] = []
@@ -135,6 +136,7 @@ class InferenceService(
             "current_model_id": self.current_model_id,
             "current_model_name": self.current_model_name,
             "current_model_family": self.current_model_family,
+            "current_model_supports_reasoning": self.current_model_supports_reasoning,
             "current_model_dir": self.current_model_dir,
             "current_model_seq_len": self.current_model_seq_len,
             "model_path": self.model_path,

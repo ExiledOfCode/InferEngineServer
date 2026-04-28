@@ -119,7 +119,7 @@
               </el-option>
             </el-select>
           </div>
-          <div class="think-toggle">
+          <div class="think-toggle" :class="{ disabled: !currentModelSupportsReasoning }">
             <span class="think-toggle-label">Think</span>
             <el-switch
               v-model="thinkEnabled"
@@ -127,6 +127,7 @@
               inline-prompt
               active-text="开"
               inactive-text="关"
+              :disabled="!currentModelSupportsReasoning || chatStore.loading"
             />
           </div>
         </div>
@@ -510,6 +511,7 @@ const {
   composerActionTitle,
   composerStopping,
   currentModelName,
+  currentModelSupportsReasoning,
   currentModelSeqLenText,
   engineTraceEnabled,
   formatConversationTime,

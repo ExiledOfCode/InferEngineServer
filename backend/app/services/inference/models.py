@@ -7,6 +7,33 @@ from ...config import settings
 
 
 class ModelRegistryMixin:
+    @staticmethod
+    def _coerce_optional_bool(value: Any) -> Optional[bool]:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        if text in {"1", "true", "yes", "y", "on", "enable", "enabled"}:
+            return True
+        if text in {"0", "false", "no", "n", "off", "disable", "disabled"}:
+            return False
+        return None
+
+    def _infer_reasoning_support(self, value: Any, family: str, *hints: Optional[str]) -> bool:
+        explicit = self._coerce_optional_bool(value)
+        if explicit is not None:
+            return explicit
+
+        hint_text = " ".join(str(item or "") for item in hints).lower()
+        if any(key in hint_text for key in ("thinking", "reasoning", "deepseek-r1")):
+            return True
+        if "instruct" in hint_text:
+            return False
+        return str(family or "").strip().lower() == "qwen3"
+
     def _tokenizer_type_from_path(self, path: Optional[str]) -> Optional[str]:
         if not path:
             return None
@@ -251,6 +278,14 @@ class ModelRegistryMixin:
         model_id = str(raw_entry.get("id") or "").strip()
         if not model_id:
             model_id = self._normalize_model_id(name)
+        supports_reasoning = self._infer_reasoning_support(
+            raw_entry.get("supports_reasoning", raw_entry.get("reasoning")),
+            family,
+            model_id,
+            name,
+            resolved_dir,
+            model_path,
+        )
 
         if not model_path or not tokenizer_path:
             print(f"[Inference] 模型已配置但未就绪，缺少 model/tokenizer: {raw_entry}")
@@ -266,6 +301,7 @@ class ModelRegistryMixin:
             "model": model_path,
             "tokenizer": tokenizer_path,
             "tokenizer_type": tokenizer_type or "unknown",
+            "supports_reasoning": supports_reasoning,
             "executable": os.path.abspath(resolved_executable) if resolved_executable else None,
             "prompt_format": str(raw_entry.get("prompt_format") or "").strip().lower() or None,
             "system_prompt": str(raw_entry.get("system_prompt") or "").strip() or None,
@@ -355,6 +391,13 @@ class ModelRegistryMixin:
                         "model": model_file,
                         "tokenizer": tokenizer_file,
                         "tokenizer_type": tokenizer_type,
+                        "supports_reasoning": self._infer_reasoning_support(
+                            None,
+                            family,
+                            name,
+                            root,
+                            model_file,
+                        ),
                     }
                 )
 
@@ -372,6 +415,13 @@ class ModelRegistryMixin:
                         "model": model_file,
                         "tokenizer": tokenizer_file,
                         "tokenizer_type": tokenizer_type,
+                        "supports_reasoning": self._infer_reasoning_support(
+                            None,
+                            family,
+                            name,
+                            self.engine_path,
+                            model_file,
+                        ),
                     }
                 )
         return entries
@@ -422,6 +472,14 @@ class ModelRegistryMixin:
                     "model": raw_entry.get("model"),
                     "tokenizer": raw_entry.get("tokenizer"),
                     "tokenizer_type": raw_entry.get("tokenizer_type"),
+                    "supports_reasoning": self._infer_reasoning_support(
+                        raw_entry.get("supports_reasoning"),
+                        str(raw_entry.get("family") or ""),
+                        raw_entry.get("id"),
+                        raw_entry.get("name"),
+                        raw_entry.get("dir"),
+                        raw_entry.get("model"),
+                    ),
                     "executable": self._default_executable_path(str(raw_entry.get("family") or "")),
                     "prompt_format": None,
                     "system_prompt": None,
@@ -472,6 +530,7 @@ class ModelRegistryMixin:
         self.current_model_id = None
         self.current_model_name = None
         self.current_model_family = None
+        self.current_model_supports_reasoning = False
         self.current_model_dir = None
         self.current_model_seq_len = None
         self.max_new_tokens = self._resolved_max_new_tokens(None)
@@ -489,6 +548,7 @@ class ModelRegistryMixin:
         self.current_model_id = entry.get("id")
         self.current_model_name = entry.get("name")
         self.current_model_family = entry.get("family")
+        self.current_model_supports_reasoning = bool(entry.get("supports_reasoning"))
         self.current_model_dir = entry.get("dir")
         self.current_model_seq_len = entry.get("seq_len")
 
@@ -524,6 +584,7 @@ class ModelRegistryMixin:
             "id": entry.get("id"),
             "name": entry.get("name"),
             "family": entry.get("family"),
+            "supports_reasoning": bool(entry.get("supports_reasoning")),
             "source": entry.get("source"),
             "dir": entry.get("dir"),
             "model_path": entry.get("model"),

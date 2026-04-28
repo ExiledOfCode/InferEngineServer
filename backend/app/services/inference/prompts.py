@@ -6,7 +6,49 @@ class PromptMixin:
     REASONING_MODEL_FAMILIES = {"qwen3"}
 
     def _supports_reasoning_flow(self) -> bool:
+        explicit = getattr(self, "current_model_supports_reasoning", None)
+        if explicit is not None:
+            return bool(explicit)
         return self.current_model_family in self.REASONING_MODEL_FAMILIES
+
+    def _uses_chatml_reasoning_prefix(self, think_enabled: bool) -> bool:
+        return (
+            bool(think_enabled)
+            and self._supports_reasoning_flow()
+            and self._effective_prompt_format() == "chatml"
+        )
+
+    def _forced_assistant_response_prefix(self, think_enabled: bool) -> str:
+        if self._uses_chatml_reasoning_prefix(think_enabled):
+            return f"{self.THINK_OPEN_TAG}\n"
+        return ""
+
+    def _normalize_generated_response(self, text: str, think_enabled: bool) -> str:
+        value = str(text or "")
+        prefix = self._forced_assistant_response_prefix(think_enabled)
+        if not prefix:
+            return value
+        if self._strip_response_prefix(value).startswith(self.THINK_OPEN_TAG):
+            return value
+        return f"{prefix}{value}"
+
+    def _normalize_stream_event_response(self, event: Dict, think_enabled: bool) -> Dict:
+        event_type = str(event.get("type") or "").strip().lower()
+        if event_type == "delta":
+            normalized = dict(event)
+            normalized["raw_response"] = self._normalize_generated_response(
+                str(event.get("raw_response") or ""),
+                think_enabled,
+            )
+            return normalized
+        if event_type == "done":
+            normalized = dict(event)
+            normalized["response"] = self._normalize_generated_response(
+                str(event.get("response") or ""),
+                think_enabled,
+            )
+            return normalized
+        return event
 
     @staticmethod
     def _strip_visible_end_markers(text: str) -> str:
@@ -311,7 +353,9 @@ class PromptMixin:
         parts = []
         for message in messages:
             parts.append(f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>")
-        if self._supports_reasoning_flow() and not think_enabled:
+        if self._uses_chatml_reasoning_prefix(think_enabled):
+            parts.append("<|im_start|>assistant\n<think>\n")
+        elif self._supports_reasoning_flow() and not think_enabled:
             parts.append("<|im_start|>assistant\n<think>\n\n</think>\n\n")
         else:
             parts.append("<|im_start|>assistant\n")

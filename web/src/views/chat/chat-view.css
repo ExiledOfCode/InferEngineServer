@@ -446,6 +446,10 @@
   gap: 8px;
 }
 
+.think-toggle.disabled {
+  opacity: 0.58;
+}
+
 .think-toggle-label {
   color: var(--text-secondary);
   font-size: 13px;

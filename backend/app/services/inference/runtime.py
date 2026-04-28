@@ -250,8 +250,6 @@ class RuntimeOptionsMixin:
         max_allowed = self._current_max_new_tokens_cap()
         base_value = self._clamp_max_new_tokens(model_value, self.default_max_new_tokens, max_allowed)
         if self.runtime_max_new_tokens is not None:
-            if self.current_model_seq_len and self.runtime_max_new_tokens >= self.current_model_seq_len:
-                return base_value
             return self._clamp_max_new_tokens(self.runtime_max_new_tokens, base_value, max_allowed)
         return base_value
 
@@ -350,6 +348,7 @@ class RuntimeOptionsMixin:
             "current_model_id": self.current_model_id,
             "current_model_name": self.current_model_name,
             "current_model_family": self.current_model_family,
+            "current_model_supports_reasoning": self.current_model_supports_reasoning,
             "current_model_seq_len": self.current_model_seq_len,
             "running": self.is_running(),
             "ready": self.is_ready(),

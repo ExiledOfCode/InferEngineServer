@@ -391,6 +391,7 @@ class ProcessMixin:
                 response = self._generate_with_process(model_prompt)
             else:
                 response = self._generate_once(model_prompt)
+            response = self._normalize_generated_response(response, think_enabled)
 
             if self._should_rescue_reasoning_only_answer(response, think_enabled):
                 response = self._rescue_reasoning_only_response(prompt, safe_history, response)
@@ -472,6 +473,7 @@ class ProcessMixin:
                 stream_failed = False
                 try:
                     for event in self._generate_with_process_stream(model_prompt):
+                        event = self._normalize_stream_event_response(event, think_enabled)
                         if event.get("type") == "delta":
                             yield event
                         elif event.get("type") == "done":
@@ -484,6 +486,7 @@ class ProcessMixin:
                         response = ""
             else:
                 response = self._generate_once(model_prompt)
+            response = self._normalize_generated_response(response, think_enabled)
 
             if self._should_rescue_reasoning_only_answer(response, think_enabled):
                 rescue_stream = self._rescue_reasoning_only_stream(prompt, safe_history, response)
