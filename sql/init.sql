@@ -1,3 +1,5 @@
+-- 文件说明：服务端数据库初始化脚本，创建用户、会话、消息等业务表。
+
 -- 创建数据库
 CREATE DATABASE IF NOT EXISTS ai_chat DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

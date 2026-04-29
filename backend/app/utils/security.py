@@ -1,3 +1,5 @@
+"""文件说明：后端工具模块，封装 security 相关的通用辅助逻辑。"""
+
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt

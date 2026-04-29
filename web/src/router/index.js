@@ -1,3 +1,5 @@
+// 文件说明：前端路由表与登录态守卫，区分聊天页和管理页访问权限。
+
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 

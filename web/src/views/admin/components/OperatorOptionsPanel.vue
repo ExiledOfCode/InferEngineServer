@@ -1,3 +1,5 @@
+<!-- 文件说明：算子组选项组件，展示可选实现并发出切换事件。 -->
+
 <template>
   <section class="panel-card panel-card-operator">
     <div class="panel-head">

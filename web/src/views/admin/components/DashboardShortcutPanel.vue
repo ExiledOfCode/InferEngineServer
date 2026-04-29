@@ -1,3 +1,5 @@
+<!-- 文件说明：管理首页快捷入口组件，引导进入引擎、算子和用户管理页面。 -->
+
 <template>
   <section class="panel-card panel-card-shortcuts">
     <div class="panel-head">

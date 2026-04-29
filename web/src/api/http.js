@@ -1,3 +1,5 @@
+// 文件说明：Axios 客户端封装，处理 API 基址推断、鉴权头、错误归一化和重试。
+
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth'
 import router from '../router'

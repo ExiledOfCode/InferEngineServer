@@ -1,3 +1,5 @@
+"""文件说明：推理服务模块，封装 operators 相关的运行时逻辑并被 InferenceService 组合使用。"""
+
 import json
 import os
 import time

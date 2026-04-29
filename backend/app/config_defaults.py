@@ -1,3 +1,5 @@
+"""文件说明：推理模型、引擎开关和算子选项的默认值定义。"""
+
 DEFAULT_INFERENCE_ENGINE_OPTIONS = [
     {
         "id": "trace_enabled",

@@ -1,3 +1,5 @@
+"""文件说明：FastAPI 应用入口，负责日志过滤、CORS、路由注册和数据库初始化。"""
+
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

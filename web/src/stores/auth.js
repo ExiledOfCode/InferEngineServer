@@ -1,3 +1,5 @@
+// 文件说明：登录态 Pinia Store，管理 token、当前用户和退出登录流程。
+
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '../api'

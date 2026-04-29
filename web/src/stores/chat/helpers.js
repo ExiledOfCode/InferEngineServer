@@ -1,3 +1,5 @@
+// 文件说明：聊天 Store 的纯函数工具，处理消息归一化、置顶会话和错误格式化。
+
 const PINNED_CONVERSATIONS_KEY = 'chat:pinned-conversations'
 
 export function collapseRepeatedLines(content) {

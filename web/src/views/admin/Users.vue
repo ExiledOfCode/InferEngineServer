@@ -1,3 +1,5 @@
+<!-- 文件说明：用户管理页面，提供用户创建、状态切换、密码重置和删除操作。 -->
+
 <template>
   <AdminShell active-view="users">
     <div class="admin-page">

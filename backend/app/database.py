@@ -1,3 +1,5 @@
+"""文件说明：SQLAlchemy 数据库连接、会话生命周期和兼容性字段迁移。"""
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker

@@ -1,3 +1,5 @@
+"""文件说明：Pydantic 数据结构定义，约束 message 相关接口的请求和响应格式。"""
+
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional

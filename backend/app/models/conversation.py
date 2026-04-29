@@ -1,3 +1,5 @@
+"""文件说明：ORM 模型定义，描述 conversation 表的字段、索引和关系映射。"""
+
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime

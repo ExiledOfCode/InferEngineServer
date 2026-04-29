@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""文件说明：HTTP 基准测试脚本，压测 bench_status_api 对应的服务端接口。"""
+
 import argparse
 import time
 

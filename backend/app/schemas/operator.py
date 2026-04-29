@@ -1,3 +1,5 @@
+"""文件说明：Pydantic 数据结构定义，约束 operator 相关接口的请求和响应格式。"""
+
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field

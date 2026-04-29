@@ -1,3 +1,5 @@
+<!-- 文件说明：算子优化页面，按算子组选择 CPU/CUDA 实现并提示重启敏感项。 -->
+
 <template>
   <AdminShell active-view="operators">
     <div class="admin-page">

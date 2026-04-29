@@ -1,3 +1,5 @@
+"""文件说明：推理服务模块，封装 service 相关的运行时逻辑并被 InferenceService 组合使用。"""
+
 import os
 import queue
 import subprocess
@@ -58,6 +60,8 @@ class InferenceService(
         self.stdout_queue: Optional[queue.Queue] = None
         self.stdout_reader: Optional[threading.Thread] = None
 
+        # 这些锁分别保护推理请求、stdin 写入、请求编号、trace 和取消状态。
+        # 细分锁可以让状态接口/取消接口在长时间生成时仍能响应。
         self.lock = threading.Lock()
         self.stdin_lock = threading.Lock()
         self.counter_lock = threading.Lock()
@@ -107,6 +111,7 @@ class InferenceService(
         self.operator_option_values = self._load_operator_option_values(self.operator_state_payload)
         self.runtime_max_new_tokens = self._load_runtime_max_new_tokens(self.runtime_state_payload)
         self.runtime_temperature = self._load_runtime_temperature(self.runtime_state_payload)
+        # 运行时选项会在 _apply_engine_options 中落到具体成员，再由 _process_env 传给 C++ 进程。
         self.trace_enabled = False
         self.optimized_weight_loading = False
         self.paged_kv_cache = True

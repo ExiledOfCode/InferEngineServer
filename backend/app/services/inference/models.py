@@ -1,3 +1,5 @@
+"""文件说明：推理服务模块，封装 models 相关的运行时逻辑并被 InferenceService 组合使用。"""
+
 import json
 import os
 import struct
@@ -55,6 +57,7 @@ class ModelRegistryMixin:
         if not value:
             return None
 
+        # 支持绝对路径、models 根目录相对路径和引擎目录相对路径，方便部署时只改配置。
         candidates: List[str] = []
         if os.path.isabs(value):
             candidates.append(value)
@@ -241,6 +244,7 @@ class ModelRegistryMixin:
             if resolved_dir:
                 search_dirs.append(resolved_dir)
             search_dirs.append(os.path.dirname(resolved_model))
+            # 模型目录经常只显式配置 .bin，tokenizer 在同目录按常见文件名自动发现。
             for search_dir in search_dirs:
                 _, detected_tokenizer, detected_tokenizer_type = self._find_model_and_tokenizer_in_dir(search_dir)
                 if detected_tokenizer:

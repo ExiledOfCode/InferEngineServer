@@ -1,3 +1,5 @@
+<!-- 文件说明：引擎优化页面，编辑推理上下文、采样和加载策略等运行选项。 -->
+
 <template>
   <AdminShell active-view="engine">
     <div class="admin-page">

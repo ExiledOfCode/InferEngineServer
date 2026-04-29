@@ -1,3 +1,5 @@
+<!-- 文件说明：登录页面，负责凭据提交和登录后的角色路由跳转。 -->
+
 <template>
   <div class="login-shell">
     <div class="aurora one"></div>

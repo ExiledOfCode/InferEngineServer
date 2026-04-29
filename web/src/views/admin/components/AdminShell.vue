@@ -1,3 +1,5 @@
+<!-- 文件说明：管理后台布局组件，封装侧栏导航、用户信息和退出入口。 -->
+
 <template>
   <div class="admin-shell">
     <aside class="admin-sidebar">

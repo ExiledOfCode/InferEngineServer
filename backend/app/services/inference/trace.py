@@ -1,3 +1,5 @@
+"""文件说明：推理服务模块，封装 trace 相关的运行时逻辑并被 InferenceService 组合使用。"""
+
 import json
 import time
 from copy import deepcopy
@@ -179,6 +181,7 @@ class TraceMixin:
         if not step_id:
             return
 
+        # C++ 进程把推理链路事件写到 stdout；这里按 step 合并，供前端时间线实时展示。
         with self.trace_lock:
             if not self.current_trace:
                 return

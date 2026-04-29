@@ -1,3 +1,5 @@
+/* 文件说明：聊天页面样式，控制会话列表、消息气泡、输入区和跟踪侧栏布局。 */
+
 .chat-shell {
   --surface-sidebar: #f7f7f8;
   --surface-sidebar-hover: #ececec;

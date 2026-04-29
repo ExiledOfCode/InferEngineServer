@@ -1,3 +1,5 @@
+<!-- 文件说明：管理后台首页，展示统计指标和配置快捷入口。 -->
+
 <template>
   <AdminShell active-view="dashboard">
     <div class="admin-page">

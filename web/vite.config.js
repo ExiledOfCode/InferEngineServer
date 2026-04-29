@@ -1,3 +1,5 @@
+// 文件说明：Vite 构建配置，设置 Vue 插件和开发服务器代理。
+
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 

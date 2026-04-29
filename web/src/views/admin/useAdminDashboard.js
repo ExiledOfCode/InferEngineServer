@@ -1,3 +1,5 @@
+// 文件说明：管理后台组合式状态逻辑，封装统计、引擎选项和算子选项加载保存。
+
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 

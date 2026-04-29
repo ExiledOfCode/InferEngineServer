@@ -1,3 +1,5 @@
+// 文件说明：Markdown 渲染工具，统一聊天消息中的链接与代码块展示。
+
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 

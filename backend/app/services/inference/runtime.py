@@ -1,3 +1,5 @@
+"""文件说明：推理服务模块，封装 runtime 相关的运行时逻辑并被 InferenceService 组合使用。"""
+
 import json
 import os
 import time
@@ -146,6 +148,7 @@ class RuntimeOptionsMixin:
         order: List[str] = []
         catalog: Dict[str, Dict[str, Any]] = {}
 
+        # 默认配置定义稳定顺序；环境变量里的扩展项只覆盖字段，不打乱管理页展示。
         for item in self.DEFAULT_ENGINE_OPTIONS:
             option_id = self._normalize_model_id(item.get("id"))
             order.append(option_id)
@@ -273,6 +276,7 @@ class RuntimeOptionsMixin:
         if not path:
             return
 
+        # 引擎开关和可变采样参数写在同一个运行时 JSON，重启后可恢复管理页状态。
         os.makedirs(os.path.dirname(path), exist_ok=True)
         payload = {
             "updated_at": time.time(),

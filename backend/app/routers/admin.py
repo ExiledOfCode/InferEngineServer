@@ -1,3 +1,5 @@
+"""文件说明：FastAPI 路由模块，提供 admin 相关的 HTTP 接口和权限校验。"""
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List

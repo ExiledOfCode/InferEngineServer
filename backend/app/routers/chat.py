@@ -1,3 +1,5 @@
+"""文件说明：FastAPI 路由模块，提供 chat 相关的 HTTP 接口和权限校验。"""
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -52,6 +54,7 @@ def save_assistant_message(
     trace_payload,
 ) -> tuple[Message, object | None]:
     serialized_trace = json.dumps(trace_payload, ensure_ascii=False) if trace_payload else None
+    # 先按完整埋点保存；若数据库字段或 JSON 过大导致失败，再降级为只保存回答内容。
     assistant_message = Message(
         conversation_id=conversation_id,
         role="assistant",
@@ -268,6 +271,7 @@ def stream_message(
         db.commit()
 
     def event_stream():
+        # SSE 生命周期：delta 多次推送临时消息，done 持久化最终消息并回传真实 message id。
         live_raw_response = ""
         infer_start = time.monotonic()
 
@@ -282,6 +286,7 @@ def stream_message(
                 if event_type == "delta":
                     live_raw_response = str(event.get("raw_response") or "")
                     parsed_live = inference_service.parse_streaming_assistant_response(live_raw_response)
+                    # 流式阶段还没有数据库 id，用 stream-{conversation_id} 作为前端临时占位。
                     payload = {
                         "message": build_streaming_message_payload(
                             conversation_id,
@@ -309,6 +314,7 @@ def stream_message(
 
                 trace_payload = inference_service.trace_status()
                 persist_start = time.monotonic()
+                # done 到达后再统一写入 assistant 消息，避免 delta 阶段频繁写数据库。
                 assistant_message, stored_trace_payload = save_assistant_message(
                     db,
                     conversation_id=conversation_id,

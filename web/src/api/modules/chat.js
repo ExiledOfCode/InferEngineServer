@@ -1,3 +1,5 @@
+// 文件说明：前端 API 模块，封装 chat 相关后端接口调用。
+
 import api, { getActiveBaseURL } from '../http'
 import router from '../../router'
 import { useAuthStore } from '../../stores/auth'
@@ -73,6 +75,7 @@ async function consumeEventStream(stream, id, handlers = {}) {
   let buffer = ''
   let donePayload = null
 
+  // fetch 不会像 EventSource 那样自动解析 SSE，这里按空行切块并分发 delta/done/error。
   const handleEvent = parsed => {
     if (!parsed) {
       return
@@ -102,6 +105,7 @@ async function consumeEventStream(stream, id, handlers = {}) {
     const { value, done } = await reader.read()
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n')
 
+    // 一个网络包可能包含半个或多个 SSE block，因此必须保留未完成的 buffer。
     let separatorIndex = buffer.indexOf('\n\n')
     while (separatorIndex !== -1) {
       const block = buffer.slice(0, separatorIndex)

@@ -1,3 +1,5 @@
+<!-- 文件说明：管理首页统计卡片组件，展示用户、会话和消息数量。 -->
+
 <template>
   <section class="panel-card panel-card-stats stats-panel">
     <div class="panel-head">

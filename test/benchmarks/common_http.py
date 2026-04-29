@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""文件说明：HTTP 基准测试脚本，压测 common_http 对应的服务端接口。"""
+
 import csv
 import json
 import os

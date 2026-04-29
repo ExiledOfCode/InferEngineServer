@@ -1,3 +1,5 @@
+"""文件说明：推理服务模块，封装 process 相关的运行时逻辑并被 InferenceService 组合使用。"""
+
 import json
 import os
 import queue
@@ -13,6 +15,8 @@ class ProcessMixin:
     RESPONSE_CHUNK_MARKER = "[RESPONSE_CHUNK]"
 
     def _process_env(self) -> Dict[str, str]:
+        # 这些环境变量是 Python 服务和 KuiperLLama demo 进程之间的控制面。
+        # 后端选项在这里被翻译成 C++ 侧读取的 KLLM_* 开关。
         paged_kv_cache_enabled = self.paged_kv_cache and self._supports_paged_kv_cache()
         optimized_weight_loading = self.optimized_weight_loading and self._supports_optimized_weight_loading()
         operator_env = self.operator_process_env() if hasattr(self, "operator_process_env") else {}
@@ -69,6 +73,8 @@ class ProcessMixin:
                 self.process = None
                 return
 
+            # demo 进程启动后会先加载模型；只有收到 [READY] 才允许后续请求写入 stdin。
+            # 其他启动日志只保留最近片段，便于超时/失败时反馈到管理页。
             self._start_stdout_reader()
             startup_logs: List[str] = []
             deadline = time.monotonic() + float(self.startup_timeout_seconds)
@@ -146,6 +152,8 @@ class ProcessMixin:
             self.stdout_reader = None
             return
 
+        # stdout 只能被一个线程持续读取；主请求线程通过队列按超时消费，
+        # 避免阻塞在 readline 导致取消和启动超时无法生效。
         self.stdout_queue = queue.Queue()
 
         def _reader(stream, line_queue: queue.Queue):
@@ -284,6 +292,8 @@ class ProcessMixin:
         if not reasoning_content:
             return response
 
+        # 思考模型在 max_token 用尽时可能只输出 <think> 内容。
+        # 此处复用同一上下文再发一次“非思考”请求，尽量补出最终回答。
         self._mark_answer_rescue_started()
         rescue_prompt = self._build_prompt(prompt, history or [], think_enabled=False)
         rescue_response = self._generate_with_process(rescue_prompt) if self.is_running() else self._generate_once(rescue_prompt)
@@ -387,6 +397,7 @@ class ProcessMixin:
             if self._is_cancel_requested():
                 raise InferenceCancelledError("推理已取消")
 
+            # 优先复用常驻进程，避免每条消息重复加载模型；进程不可用时退回单次调用。
             if self.is_running():
                 response = self._generate_with_process(model_prompt)
             else:
@@ -534,6 +545,8 @@ class ProcessMixin:
 
             try:
                 with self.stdin_lock:
+                    # 常驻 demo 以 [PROMPT_START]/[PROMPT_END] 包住一次完整请求。
+                    # stdout 侧再用 [RESPONSE_START]/[RESPONSE_END] 标记完整回答边界。
                     self.process.stdin.write("[PROMPT_START]\n")
                     self.process.stdin.write(model_prompt)
                     if not model_prompt.endswith("\n"):
@@ -585,6 +598,7 @@ class ProcessMixin:
                     cancelled = True
                     continue
                 if text == "[RESPONSE_START]":
+                    # RESPONSE_START 之后的普通行属于完整回答；诊断日志不会混入用户消息。
                     in_response = True
                     continue
                 if text == "[RESPONSE_END]":
@@ -616,6 +630,7 @@ class ProcessMixin:
 
             try:
                 with self.stdin_lock:
+                    # 流式请求复用同一套 prompt 边界；C++ 侧额外输出 RESPONSE_CHUNK 供前端增量展示。
                     self.process.stdin.write("[PROMPT_START]\n")
                     self.process.stdin.write(model_prompt)
                     if not model_prompt.endswith("\n"):
@@ -698,6 +713,7 @@ class ProcessMixin:
 
                 chunk = self._extract_response_chunk(text)
                 if chunk is not None:
+                    # chunk_parts 保留已经发给前端的原始文本，done 时可和完整缓冲互为兜底。
                     chunk_parts.append(chunk)
                     yield {
                         "type": "delta",

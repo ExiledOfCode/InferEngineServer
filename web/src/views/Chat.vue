@@ -1,3 +1,5 @@
+<!-- 文件说明：聊天主页面，组合会话列表、消息流、输入框和推理跟踪视图。 -->
+
 <template>
   <div class="chat-shell">
     <aside class="chat-sidebar" :class="{ show: mobileSidebarOpen, collapsed: sidebarCollapsed }">

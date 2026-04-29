@@ -1,3 +1,5 @@
+<!-- 文件说明：引擎参数表单组件，负责选项展示、草稿编辑和保存事件分发。 -->
+
 <template>
   <section class="panel-card panel-card-engine">
     <div class="panel-head">

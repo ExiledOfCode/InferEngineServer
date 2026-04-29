@@ -1,3 +1,5 @@
+"""文件说明：后端测试模块，覆盖 test_inference_service 相关行为。"""
+
 import json
 import os
 import struct

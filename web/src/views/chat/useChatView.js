@@ -1,3 +1,5 @@
+// 文件说明：聊天页面组合式逻辑，封装消息渲染、推理跟踪、侧栏尺寸和用户交互。
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

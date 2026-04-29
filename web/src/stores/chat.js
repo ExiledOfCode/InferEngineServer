@@ -1,3 +1,5 @@
+// 文件说明：聊天 Pinia Store，管理会话、消息、流式推理、模型切换和反馈状态。
+
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { chatApi } from '../api'
@@ -327,6 +329,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!isActiveConversation()) {
         return
       }
+      // 服务端 delta 使用临时消息，done 使用真实数据库消息；这里统一替换同一个占位项。
       const normalized = normalizeAssistantMessage(payload)
       const nextMessage = {
         conversation_id: convId,
@@ -431,6 +434,7 @@ export const useChatStore = defineStore('chat', () => {
         })
         response = normalizeAssistantMessage(streamedPayload?.message || streamedPayload)
       } catch (err) {
+        // 若 SSE 在收到任何 delta 前失败，则退回普通 POST，保留旧浏览器/代理场景可用性。
         if (!receivedStreamDelta && !isInferenceCancelledError(err) && err?.status !== 401) {
           response = normalizeAssistantMessage(await chatApi.sendMessage(convId, content, thinkEnabled))
         } else {
