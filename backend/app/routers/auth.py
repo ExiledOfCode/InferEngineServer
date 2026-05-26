@@ -5,11 +5,22 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from ..database import get_db
 from ..models.user import User
-from ..schemas.user import UserLogin, Token, UserResponse
-from ..utils.security import verify_password, create_access_token, get_current_user
+from ..schemas.user import UserLogin, UserRegister, Token, UserResponse
+from ..utils.security import verify_password, get_password_hash, create_access_token, get_current_user
 from ..config import settings
 
 router = APIRouter()
+
+def build_token_response(user: User) -> dict:
+    access_token = create_access_token(
+        data={"sub": user.username},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
 
 @router.post("/login", response_model=Token)
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
@@ -27,16 +38,34 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
             detail="账号已被禁用"
         )
     
-    access_token = create_access_token(
-        data={"sub": user.username},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return build_token_response(user)
+
+@router.post("/register", response_model=Token)
+def register(user_data: UserRegister, db: Session = Depends(get_db)):
+    username = user_data.username.strip()
+    password = user_data.password
+
+    if len(username) < 3 or len(username) > 50:
+        raise HTTPException(status_code=400, detail="用户名长度需为 3-50 个字符")
+    if any(ch.isspace() for ch in username):
+        raise HTTPException(status_code=400, detail="用户名不能包含空白字符")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少需要 6 位")
+
+    existing_user = db.query(User).filter(User.username == username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+
+    user = User(
+        username=username,
+        password_hash=get_password_hash(password),
+        role="user",
+        status="active"
     )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return build_token_response(user)
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):

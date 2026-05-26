@@ -7,27 +7,37 @@
     <div class="login-box">
       <div class="brand">
         <div class="logo-mark">AI</div>
-        <h1>欢迎回来</h1>
-        <p>登录后继续你的智能对话</p>
+        <h1>{{ pageTitle }}</h1>
+        <p>{{ pageSubtitle }}</p>
       </div>
+
+      <div class="mode-switch" role="tablist" aria-label="账号操作">
+        <button type="button" :class="{ active: mode === 'login' }" @click="switchMode('login')">登录</button>
+        <button type="button" :class="{ active: mode === 'register' }" @click="switchMode('register')">注册</button>
+      </div>
+
       <el-form :model="form" :rules="rules" ref="formRef" class="login-form">
         <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="用户名" prefix-icon="User" size="large" />
         </el-form-item>
         <el-form-item prop="password">
-          <el-input v-model="form.password" type="password" placeholder="密码" prefix-icon="Lock" size="large" show-password @keyup.enter="handleLogin" />
+          <el-input v-model="form.password" type="password" placeholder="密码" prefix-icon="Lock" size="large" show-password @keyup.enter="handleSubmit" />
+        </el-form-item>
+        <el-form-item v-if="mode === 'register'" prop="confirmPassword">
+          <el-input v-model="form.confirmPassword" type="password" placeholder="确认密码" prefix-icon="Lock" size="large" show-password @keyup.enter="handleSubmit" />
         </el-form-item>
         <el-form-item>
-          <el-button class="login-btn" type="primary" size="large" :loading="loading" @click="handleLogin">登录</el-button>
+          <el-button class="login-btn" type="primary" size="large" :loading="loading" @click="handleSubmit">{{ actionText }}</el-button>
         </el-form-item>
       </el-form>
-      <div class="tips">默认管理员账号：<code>admin / admin</code></div>
+      <div class="tips" v-if="mode === 'login'">默认管理员账号：<code>admin / admin</code></div>
+      <div class="tips" v-else>注册成功后将以普通用户身份进入聊天页</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
@@ -36,17 +46,91 @@ const router = useRouter()
 const authStore = useAuthStore()
 const formRef = ref(null)
 const loading = ref(false)
-const form = reactive({ username: '', password: '' })
-const rules = { username: [{ required: true, message: '请输入用户名', trigger: 'blur' }], password: [{ required: true, message: '请输入密码', trigger: 'blur' }] }
+const mode = ref('login')
+const form = reactive({ username: '', password: '', confirmPassword: '' })
+const pageTitle = computed(() => mode.value === 'login' ? '欢迎回来' : '创建账号')
+const pageSubtitle = computed(() => mode.value === 'login' ? '登录后继续你的智能对话' : '注册后开始你的智能对话')
+const actionText = computed(() => mode.value === 'login' ? '登录' : '注册并进入')
 
-async function handleLogin() {
+function validateUsername(_, value, callback) {
+  const username = String(value || '').trim()
+  if (!username) {
+    callback(new Error('请输入用户名'))
+    return
+  }
+  if (mode.value === 'register' && (username.length < 3 || username.length > 50)) {
+    callback(new Error('用户名长度需为 3-50 个字符'))
+    return
+  }
+  if (mode.value === 'register' && /\s/.test(username)) {
+    callback(new Error('用户名不能包含空白字符'))
+    return
+  }
+  callback()
+}
+
+function validatePassword(_, value, callback) {
+  if (!value) {
+    callback(new Error('请输入密码'))
+    return
+  }
+  if (mode.value === 'register' && value.length < 6) {
+    callback(new Error('密码至少需要 6 位'))
+    return
+  }
+  callback()
+}
+
+function validateConfirmPassword(_, value, callback) {
+  if (mode.value !== 'register') {
+    callback()
+    return
+  }
+  if (!value) {
+    callback(new Error('请再次输入密码'))
+    return
+  }
+  if (value !== form.password) {
+    callback(new Error('两次输入的密码不一致'))
+    return
+  }
+  callback()
+}
+
+const rules = {
+  username: [{ validator: validateUsername, trigger: 'blur' }],
+  password: [{ validator: validatePassword, trigger: 'blur' }],
+  confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }]
+}
+
+function switchMode(nextMode) {
+  mode.value = nextMode
+  form.confirmPassword = ''
+  nextTick(() => formRef.value?.clearValidate())
+}
+
+async function handleSubmit() {
   try {
     await formRef.value.validate()
     loading.value = true
-    const user = await authStore.login(form.username, form.password)
-    ElMessage.success('登录成功')
+    const username = form.username.trim()
+    const user = mode.value === 'login'
+      ? await authStore.login(username, form.password)
+      : await authStore.register(username, form.password)
+    ElMessage.success(mode.value === 'login' ? '登录成功' : '注册成功')
     router.push(user.role === 'admin' ? '/admin/dashboard' : '/chat')
-  } catch (e) { ElMessage.error(e.detail || '登录失败') }
+  } catch (e) {
+    if (!e?.detail && !e?.message) {
+      return
+    }
+    if (e?.detail) {
+      ElMessage.error(e.detail)
+    } else if (e?.message) {
+      ElMessage.error(e.message)
+    } else {
+      ElMessage.error(mode.value === 'login' ? '登录失败' : '注册失败')
+    }
+  }
   finally { loading.value = false }
 }
 </script>
@@ -130,8 +214,36 @@ async function handleLogin() {
   font-size: 14px;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 24px;
+  padding: 5px;
+  border-radius: 13px;
+  background: #eef2f8;
+  border: 1px solid #dbe2ec;
+}
+
+.mode-switch button {
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: #ffffff;
+  color: #0f7d62;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
 .login-form {
-  margin-top: 28px;
+  margin-top: 22px;
 }
 
 .login-form :deep(.el-input__wrapper) {

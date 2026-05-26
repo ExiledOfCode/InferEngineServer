@@ -15,7 +15,7 @@ class ProcessMixin:
     RESPONSE_CHUNK_MARKER = "[RESPONSE_CHUNK]"
 
     def _process_env(self) -> Dict[str, str]:
-        # 这些环境变量是 Python 服务和 KuiperLLama demo 进程之间的控制面。
+        # 这些环境变量是 Python 服务和 W_InferEngine demo 进程之间的控制面。
         # 后端选项在这里被翻译成 C++ 侧读取的 KLLM_* 开关。
         paged_kv_cache_enabled = self.paged_kv_cache and self._supports_paged_kv_cache()
         optimized_weight_loading = self.optimized_weight_loading and self._supports_optimized_weight_loading()

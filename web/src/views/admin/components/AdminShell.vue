@@ -6,7 +6,7 @@
       <div class="sidebar-brand">
         <div class="brand-mark">控</div>
         <div class="brand-text">
-          <h1>自研推理引擎对话平台</h1>
+          <h1>推理引擎对话平台</h1>
           <p>管理控制台</p>
         </div>
       </div>

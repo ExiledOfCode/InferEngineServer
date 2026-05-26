@@ -120,9 +120,9 @@ INFERENCE_RAW_WITH_HISTORY=false
 # 可选：指定模型目录（相对 INFERENCE_ENGINE_PATH/models）
 INFERENCE_MODEL_DIR=Qwen2.5-0.5B
 # 可选：直接指定模型文件（优先级高于 INFERENCE_MODEL_DIR）
-# INFERENCE_MODEL_PATH=/mnt/d/.../KuiperLLama/models/Qwen2.5-0.5B/Qwen2.5-0.5B.bin
+# INFERENCE_MODEL_PATH=/mnt/d/.../W_InferEngine/models/Qwen2.5-0.5B/Qwen2.5-0.5B.bin
 # 可选：直接指定 tokenizer（未配置时会在模型目录自动查找）
-# INFERENCE_TOKENIZER_PATH=/mnt/d/.../KuiperLLama/models/Qwen2.5-0.5B/tokenizer.json
+# INFERENCE_TOKENIZER_PATH=/mnt/d/.../W_InferEngine/models/Qwen2.5-0.5B/tokenizer.json
 ```
 
 ## 配置推理框架
@@ -169,7 +169,7 @@ cmake -DLLAMA2_SUPPORT=ON ..
 make -j16
 # make -j$(nproc)
 
-./build/demo/chat_server /workspace/Open_Source_Projects/MyInferenceEngine/KuiperLLama/Qwen2.5-0.5B.bin /workspace/Open_Source_Projects/MyInferenceEngine/KuiperLLama/Qwen/Qwen2.5-0.5B/tokenizer.json
+./build/demo/chat_server /workspace/Open_Source_Projects/MyInferenceEngine/W_InferEngine/Qwen2.5-0.5B.bin /workspace/Open_Source_Projects/MyInferenceEngine/W_InferEngine/Qwen/Qwen2.5-0.5B/tokenizer.json
 ```
 
 ## 配置 Clash

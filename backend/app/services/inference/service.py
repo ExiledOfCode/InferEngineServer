@@ -25,7 +25,7 @@ class InferenceService(
     ModelRegistryMixin,
     ProcessMixin,
 ):
-    """基于 KuiperLLama demo 可执行文件的推理服务。"""
+    """基于 W_InferEngine demo 可执行文件的推理服务。"""
 
     THINK_OPEN_TAG = "<think>"
     THINK_CLOSE_TAG = "</think>"
@@ -189,9 +189,18 @@ class InferenceService(
 你的问题是: {prompt}
 
 请检查:
-- 可执行文件({executable_name}): {'✓' if self.executable and os.path.exists(self.executable) else '❌ 未找到'}
-- 模型文件(.bin): {'✓' if self.model_path and os.path.exists(self.model_path) else '❌ 未找到'}
-- 分词器(tokenizer.json): {'✓' if self.tokenizer_path and os.path.exists(self.tokenizer_path) else '❌ 未找到'}
+- 可执行文件({executable_name}): {
+    self.executable if not (self.executable and os.path.exists(self.executable))
+    else '✓'
+}
+- 模型文件(.bin): {
+    self.model_path if not (self.model_path and os.path.exists(self.model_path))
+    else '✓'
+}
+- 分词器(tokenizer.json): {
+    self.tokenizer_path if not (self.tokenizer_path and os.path.exists(self.tokenizer_path))
+    else '✓'
+}
 """
 
     def clear_history(self):

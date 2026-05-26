@@ -86,7 +86,7 @@
     <section class="chat-main" :class="{ 'empty-chat': chatStore.messages.length === 0 }">
       <header class="chat-header">
         <div class="header-meta">
-          <h1>自研推理引擎对话平台</h1>
+          <h1>AI对话平台</h1>
           <div class="current-model-line">
             <span class="current-model-name">{{ currentModelName || '未选择模型' }}</span>
             <span v-if="currentModelSeqLenText" class="current-model-context">
@@ -139,7 +139,7 @@
         <div class="message-track">
           <div v-if="chatStore.messages.length === 0" class="welcome-card">
             <h2>今天有什么计划？</h2>
-            <p>欢迎使用自研推理引擎对话平台，输入你的问题开始对话。</p>
+            <p>欢迎使用AI对话平台，输入你的问题开始对话。</p>
           </div>
 
           <article
