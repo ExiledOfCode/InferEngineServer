@@ -1,5 +1,16 @@
 """文件说明：推理模型、引擎开关和算子选项的默认值定义。"""
 
+import os
+from pathlib import Path
+
+
+def _engine_path(*parts: str) -> str:
+    engine = os.environ.get("INFERENCE_ENGINE_PATH", "")
+    if not engine:
+        engine = str(Path(__file__).resolve().parents[3] / "W_InferEngine")
+    return str(Path(engine, *parts))
+
+
 DEFAULT_INFERENCE_ENGINE_OPTIONS = [
     {
         "id": "trace_enabled",
@@ -38,12 +49,12 @@ DEFAULT_INFERENCE_OPERATOR_OPTIONS = [
         "name": "GEMM / MatMul",
         "description": "控制线性层主乘法算子的 CUDA 实现版本。",
         "env_var": "KLLM_OP_MATMUL_IMPL",
-        "default_selected": "kuiper_cuda",
+        "default_selected": "src_cuda",
         "requires_restart": True,
         "choices": [
             {
-                "id": "kuiper_cuda",
-                "name": "Kuiper CUDA",
+                "id": "src_cuda",
+                "name": "Src CUDA",
                 "description": "项目当前默认 CUDA kernel，适合单 token decode 场景。",
                 "supported": True,
             },
@@ -66,12 +77,12 @@ DEFAULT_INFERENCE_OPERATOR_OPTIONS = [
         "name": "RMSNorm",
         "description": "控制 RMSNorm 的 CUDA 实现版本。",
         "env_var": "KLLM_OP_RMSNORM_IMPL",
-        "default_selected": "kuiper_cuda",
+        "default_selected": "src_cuda",
         "requires_restart": True,
         "choices": [
             {
-                "id": "kuiper_cuda",
-                "name": "Kuiper CUDA",
+                "id": "src_cuda",
+                "name": "Src CUDA",
                 "description": "项目当前默认 RMSNorm kernel。",
                 "supported": True,
             },
@@ -94,7 +105,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen2.5-1.5B-Instruct",
         "model_path": "/root/models/Qwen2.5-1.5B-Instruct/Qwen2.5-1.5B-Instruct.bin",
         "tokenizer_path": "/root/models/Qwen2.5-1.5B-Instruct/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen_infer",
+        "executable_path": _engine_path("build", "demo", "qwen_infer"),
         "prompt_format": "chatml",
     },
     {
@@ -104,7 +115,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen3-1.7B",
         "model_path": "/root/models/Qwen3-1.7B/Qwen3-1.7B.bin",
         "tokenizer_path": "/root/models/Qwen3-1.7B/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen3_infer",
+        "executable_path": _engine_path("build", "demo", "qwen3_infer"),
         "prompt_format": "chatml",
         "max_new_tokens": 256,
     },
@@ -115,7 +126,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen3-1.7B",
         "model_path": "/root/models/Qwen3-1.7B/Qwen3-1.7B-bf16.bin",
         "tokenizer_path": "/root/models/Qwen3-1.7B/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen3_infer",
+        "executable_path": _engine_path("build", "demo", "qwen3_infer"),
         "prompt_format": "chatml",
         "max_new_tokens": 256,
     },
@@ -126,7 +137,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen3-0.6B",
         "model_path": "/root/models/Qwen3-0.6B/Qwen3-0.6B.bin",
         "tokenizer_path": "/root/models/Qwen3-0.6B/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen3_infer",
+        "executable_path": _engine_path("build", "demo", "qwen3_infer"),
         "prompt_format": "chatml",
         "max_new_tokens": 256,
     },
@@ -137,7 +148,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen3-4B-Thinking-2507",
         "model_path": "/root/models/Qwen3-4B-Thinking-2507/Qwen3-4B-Thinking-2507-int8.bin",
         "tokenizer_path": "/root/models/Qwen3-4B-Thinking-2507/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen3_infer",
+        "executable_path": _engine_path("build", "demo", "qwen3_infer"),
         "prompt_format": "chatml",
         "supports_reasoning": True,
         "max_new_tokens": 8192,
@@ -149,7 +160,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen3-4B-Instruct-2507",
         "model_path": "/root/models/Qwen3-4B-Instruct-2507/Qwen3-4B-Instruct-2507-int8.bin",
         "tokenizer_path": "/root/models/Qwen3-4B-Instruct-2507/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen3_infer",
+        "executable_path": _engine_path("build", "demo", "qwen3_infer"),
         "prompt_format": "chatml",
         "supports_reasoning": False,
         "max_new_tokens": 8192,
@@ -161,7 +172,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen3-8B",
         "model_path": "/root/models/Qwen3-8B/Qwen3-8B-awq-int4.bin",
         "tokenizer_path": "/root/models/Qwen3-8B/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen3_infer",
+        "executable_path": _engine_path("build", "demo", "qwen3_infer"),
         "prompt_format": "chatml",
         "supports_reasoning": True,
         "max_new_tokens": 8192,
@@ -173,7 +184,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Llama-3.2-1B-Instruct",
         "model_path": "/root/models/Llama-3.2-1B-Instruct/Llama-3.2-1B-Instruct-bf16.bin",
         "tokenizer_path": "/root/models/Llama-3.2-1B-Instruct/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/llama3_infer",
+        "executable_path": _engine_path("build", "demo", "llama3_infer"),
         "prompt_format": "llama3",
         "max_new_tokens": 256,
     },
@@ -183,8 +194,8 @@ DEFAULT_INFERENCE_MODELS = [
         "family": "tinyllama",
         "model_dir": "/root/models/TinyLlama-1.1B-Chat-v1.0",
         "model_path": "/root/models/TinyLlama-1.1B-Chat-v1.0/TinyLlama-1.1B-Chat-v1.0-bf16.bin",
-        "tokenizer_path": "/root/models/TinyLlama-1.1B-Chat-v1.0/tokenizer.model",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/tinyllama_infer",
+        "tokenizer_path": "/root/models/TinyLlama-1.1B-Chat-v1.0/tokenizer.json",
+        "executable_path": _engine_path("build", "demo", "tinyllama_infer"),
         "prompt_format": "tinyllama",
         "max_new_tokens": 256,
     },
@@ -195,7 +206,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/SmolLM2-1.7B-Instruct",
         "model_path": "/root/models/SmolLM2-1.7B-Instruct/SmolLM2-1.7B-Instruct-bf16.bin",
         "tokenizer_path": "/root/models/SmolLM2-1.7B-Instruct/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/smollm_infer",
+        "executable_path": _engine_path("build", "demo", "smollm_infer"),
         "prompt_format": "chatml",
         "max_new_tokens": 256,
     },
@@ -206,7 +217,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/DeepSeek-R1-Distill-Qwen-1.5B",
         "model_path": "/root/models/DeepSeek-R1-Distill-Qwen-1.5B/DeepSeek-R1-Distill-Qwen-1.5B-bf16.bin",
         "tokenizer_path": "/root/models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/demo/deepseek_qwen_infer.py",
+        "executable_path": _engine_path("demo", "deepseek_qwen_infer.py"),
         "prompt_format": "deepseek",
         "max_new_tokens": 256,
     },
@@ -217,7 +228,7 @@ DEFAULT_INFERENCE_MODELS = [
         "model_dir": "/root/models/Qwen2.5-0.5B",
         "model_path": "/root/models/Qwen2.5-0.5B/Qwen2.5-0.5B.bin",
         "tokenizer_path": "/root/models/Qwen2.5-0.5B/tokenizer.json",
-        "executable_path": "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine/build/demo/qwen_infer",
+        "executable_path": _engine_path("build", "demo", "qwen_infer"),
         "prompt_format": "chatml",
     },
 ]

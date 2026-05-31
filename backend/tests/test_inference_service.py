@@ -152,12 +152,12 @@ class InferenceServiceTestCase(unittest.TestCase):
                 "name": "GEMM / MatMul",
                 "description": "测试矩阵乘实现切换。",
                 "env_var": "KLLM_OP_MATMUL_IMPL",
-                "default_selected": "kuiper_cuda",
+                "default_selected": "src_cuda",
                 "requires_restart": True,
                 "choices": [
                     {
-                        "id": "kuiper_cuda",
-                        "name": "Kuiper CUDA",
+                        "id": "src_cuda",
+                        "name": "Src CUDA",
                         "description": "默认实现。",
                         "supported": True,
                     },
@@ -174,12 +174,12 @@ class InferenceServiceTestCase(unittest.TestCase):
                 "name": "RMSNorm",
                 "description": "测试 RMSNorm 实现切换。",
                 "env_var": "KLLM_OP_RMSNORM_IMPL",
-                "default_selected": "kuiper_cuda",
+                "default_selected": "src_cuda",
                 "requires_restart": True,
                 "choices": [
                     {
-                        "id": "kuiper_cuda",
-                        "name": "Kuiper CUDA",
+                        "id": "src_cuda",
+                        "name": "Src CUDA",
                         "description": "默认实现。",
                         "supported": True,
                     },
@@ -320,7 +320,7 @@ class InferenceServiceTestCase(unittest.TestCase):
 
             service.update_engine_options({"trace_enabled": True})
             service.update_generation_settings(max_new_tokens=120, temperature=1.1)
-            service.update_operator_options({"matmul_impl": "kuiper_cuda"})
+            service.update_operator_options({"matmul_impl": "src_cuda"})
 
             with open(runtime_path, "r", encoding="utf-8") as fh:
                 payload = json.load(fh)
@@ -331,10 +331,10 @@ class InferenceServiceTestCase(unittest.TestCase):
             self.assertFalse(payload["options"]["warmup_on_model_switch"])
             self.assertEqual(payload["settings"]["max_new_tokens"], 120)
             self.assertAlmostEqual(payload["settings"]["temperature"], 1.1, places=6)
-            self.assertEqual(operator_payload["operators"]["matmul_impl"], "kuiper_cuda")
+            self.assertEqual(operator_payload["operators"]["matmul_impl"], "src_cuda")
             self.assertEqual(operator_payload["operators"]["rmsnorm_impl"], "lab_warp_reduce")
             process_env = service._process_env()
-            self.assertEqual(process_env["KLLM_OP_MATMUL_IMPL"], "kuiper_cuda")
+            self.assertEqual(process_env["KLLM_OP_MATMUL_IMPL"], "src_cuda")
             self.assertEqual(process_env["KLLM_OP_RMSNORM_IMPL"], "lab_warp_reduce")
 
     def test_qwen_reasoning_only_response_triggers_sync_answer_rescue(self):

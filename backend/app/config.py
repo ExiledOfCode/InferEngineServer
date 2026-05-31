@@ -1,6 +1,7 @@
 """文件说明：后端配置中心，从环境变量和默认配置生成数据库、鉴权与推理引擎参数。"""
 
 import json
+from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
     # 推理引擎配置
-    INFERENCE_ENGINE_PATH: str = "/mnt/d/Project_Repository/Open_Source_Projects/MyInferenceEngine/W_InferEngine"
+    INFERENCE_ENGINE_PATH: str = str(Path(__file__).resolve().parents[3] / "W_InferEngine")
     INFERENCE_MODEL_DIR: str = "~/models/Qwen2.5-1.5B-Instruct"
     INFERENCE_MODEL_PATH: str = ""
     INFERENCE_TOKENIZER_PATH: str = ""

@@ -31,7 +31,7 @@
           </div>
           <p class="option-desc">{{ group.description || '暂无说明' }}</p>
           <p class="option-desc">
-            选择结果会写入运行时配置；如需关闭实验版并回到原始实现，切回 `Kuiper CUDA` 即可。
+            选择结果会写入运行时配置；如需关闭实验版并回到原始实现，切回 `Src CUDA` 即可。
           </p>
         </div>
 

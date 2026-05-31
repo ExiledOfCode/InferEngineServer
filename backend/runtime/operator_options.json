@@ -1,7 +1,7 @@
 {
   "updated_at": 1777206153.051767,
   "operators": {
-    "matmul_impl": "kuiper_cuda",
-    "rmsnorm_impl": "kuiper_cuda"
+    "matmul_impl": "src_cuda",
+    "rmsnorm_impl": "src_cuda"
   }
 }
